@@ -205,15 +205,18 @@ int main(int argc, char* argv[]) {
 	};
 
 	struct __attribute__((packed, aligned(8))) NinjiInfo {
+		std::string name;
+		std::string code;
+		std::string country;
+		SkBitmap* mii_image;
+	};
+
+	struct __attribute__((packed, aligned(8))) NinjiGlobalInfo {
 		// 0: Mario
 		// 1: Luigi
 		// 2: Toad
 		// 3: Toadette
 		uint8_t charactor;
-		std::string name;
-		std::string code;
-		std::string country;
-		SkBitmap* mii_image;
 	};
 
 	struct LevelBounds {
@@ -221,12 +224,13 @@ int main(int argc, char* argv[]) {
 		int start_y;
 	};
 
-	std::unordered_set<int> levels_to_render = { 29234075 };
+	std::unordered_set<int> levels_to_render = { 33883306 };
 	std::unordered_map<int, std::unordered_map<int, std::vector<NinjiFrame>>> ninji_paths;
 	std::unordered_map<int, std::unordered_map<int, bool>> ninji_is_subworld;
 	int current_player_index = 0;
 	std::unordered_map<std::string, int> pid_to_player;
 	std::unordered_map<int, NinjiInfo> player_info;
+	std::unordered_map<int, std::unordered_map<int, NinjiGlobalInfo>> player_local_info;
 	std::unordered_map<int, LevelBounds> level_bounds;
 
 	int row = 0;
@@ -252,6 +256,63 @@ int main(int argc, char* argv[]) {
 				int replay_size      = sqlite3_column_bytes(res, 3);
 				std::vector<uint8_t> decompressed_replay(replay_size);
 				gzip_decompress(replay_data, replay_size, decompressed_replay);
+
+				/*
+				// Mario, Mario, Luigi, Luigi, Toad
+				if(std::unordered_set({ 42177, 42513, 43352, 43581, 43588 }).contains(time)) {
+					std::cout << time << ":" << std::endl;
+
+					uint32_t test = *(uint32_t*)&decompressed_replay[0x4];
+					toLittleEndian(test);
+					std::cout << "    0x4: " << test << std::endl;
+
+					test = *(uint32_t*)&decompressed_replay[0x8];
+					toLittleEndian(test);
+					std::cout << "    0x8: " << test << std::endl;
+
+					test = *(uint32_t*)&decompressed_replay[0x10];
+					toLittleEndian(test);
+					std::cout << "    0x10: " << test << std::endl;
+
+					std::cout << "    0x14: " << (int)decompressed_replay[0x14] << std::endl;
+					std::cout << "    0x15: " << (int)decompressed_replay[0x15] << std::endl;
+
+					uint16_t test2 = *(uint16_t*)&decompressed_replay[0x16];
+					toLittleEndianShort(test2);
+					std::cout << "    0x16: " << test2 << std::endl;
+
+					test = *(uint32_t*)&decompressed_replay[0x18];
+					toLittleEndian(test);
+					std::cout << "    0x18: " << test << std::endl;
+
+					test = *(uint32_t*)&decompressed_replay[0x1C];
+					toLittleEndian(test);
+					std::cout << "    0x1C: " << test << std::endl;
+
+					test = *(uint32_t*)&decompressed_replay[0x20];
+					toLittleEndian(test);
+					std::cout << "    0x20: " << test << std::endl;
+
+					test = *(uint32_t*)&decompressed_replay[0x24];
+					toLittleEndian(test);
+					std::cout << "    0x24: " << test << std::endl;
+
+					test = *(uint32_t*)&decompressed_replay[0x28];
+					toLittleEndian(test);
+					std::cout << "    0x28: " << test << std::endl;
+
+					test = *(uint32_t*)&decompressed_replay[0x2C];
+					toLittleEndian(test);
+					std::cout << "    0x2C: " << test << std::endl;
+
+					test = *(uint32_t*)&decompressed_replay[0x30];
+					toLittleEndian(test);
+					std::cout << "    0x30: " << test << std::endl;
+
+					test = *(uint32_t*)&decompressed_replay[0x34];
+					toLittleEndian(test);
+					std::cout << "    0x34: " << test << std::endl;
+				}*/
 
 				/*
 								std::cout << "YUOOOOOOOOOOOOOOOOOOOOO" << std::endl;
@@ -312,6 +373,9 @@ int main(int argc, char* argv[]) {
 								}
 								*/
 
+				uint8_t charactor                  = decompressed_replay[0x14];
+				player_local_info[data_id][player] = NinjiGlobalInfo { charactor };
+
 				size_t current_offset = 0x3C;
 				int i                 = 0;
 				while(true) {
@@ -345,7 +409,7 @@ int main(int argc, char* argv[]) {
 					i++;
 				}
 
-				if(pid_to_player.size() == 10000) {
+				if(pid_to_player.size() == 1000) {
 					// Break early for testing
 					std::cout << "Ending early for testing" << std::endl;
 					break;
@@ -390,7 +454,7 @@ int main(int argc, char* argv[]) {
 				auto country       = std::string((const char*)sqlite3_column_text(res, 2));
 				auto mii_image_url = std::string((const char*)sqlite3_column_text(res, 3));
 
-				player_info[player.second] = NinjiInfo { 0, name, code, country };
+				player_info[player.second] = NinjiInfo { name, code, country };
 				miis_to_download.push_back(mii_image_url);
 				miis_to_download_player.push_back(player.second);
 				used_flags.emplace(country);
@@ -441,8 +505,7 @@ int main(int argc, char* argv[]) {
 
 	// Create images for players
 	std::unordered_map<int, std::unordered_map<int, SkBitmap*>> player_image;
-	// TODO support all 4 players
-	for(int player = 0; player < 1; player++) {
+	for(int player = 0; player < 4; player++) {
 		std::string player_name;
 		switch(player) {
 		case 0:
@@ -584,12 +647,15 @@ int main(int argc, char* argv[]) {
 	}
 
 	// Override screen dimensions with level image
-	int data_id = *levels_to_render.begin();
-	dm.w        = level_overworld_image[data_id]->width();
-	dm.h        = level_overworld_image[data_id]->height();
-	if(level_subworld_image.contains(data_id)) {
-		dm.h += level_subworld_image[data_id]->height();
-	}
+	// int data_id = *levels_to_render.begin();
+	// dm.w        = level_overworld_image[data_id]->width();
+	// dm.h        = level_overworld_image[data_id]->height();
+	// if(level_subworld_image.contains(data_id)) {
+	//	dm.h += level_subworld_image[data_id]->height();
+	//}
+	// Choose max possible to encompass all
+	dm.w = 3840;
+	dm.h = 432 + 2688;
 
 	SDL_Window* window
 		= SDL_CreateWindow("SDL Window", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, dm.w, dm.h, windowFlags);
@@ -683,91 +749,104 @@ int main(int argc, char* argv[]) {
 
 	int rotation = 0;
 	SkFont font;
-	bool stop               = false;
-	int frame               = 0;
-	int player_update_frame = 0;
-	int player_update       = 0;
-	while(!stop) {
-		canvas->clear(SK_ColorWHITE);
+	bool stop = false;
+	for(auto data_id : levels_to_render) {
+		int frame               = 0;
+		int player_update_frame = 0;
+		int player_update       = 0;
+		while(!stop) {
+			canvas->clear(SK_ColorWHITE);
 
-		SDL_Event event;
-		while(SDL_PollEvent(&event)) {
-			switch(event.type) {
-			case SDL_KEYDOWN: {
-				SDL_Keycode key = event.key.keysym.sym;
-				if(key == SDLK_ESCAPE) {
+			SDL_Event event;
+			while(SDL_PollEvent(&event)) {
+				switch(event.type) {
+				case SDL_KEYDOWN: {
+					SDL_Keycode key = event.key.keysym.sym;
+					if(key == SDLK_ESCAPE) {
+						stop = true;
+					}
+
+					int width;
+					int height;
+					SDL_GetWindowPosition(window, &width, &height);
+					switch(key) {
+					case SDLK_RIGHT:
+						SDL_SetWindowPosition(window, width - 50, height);
+						break;
+					case SDLK_LEFT:
+						SDL_SetWindowPosition(window, width + 50, height);
+						break;
+					case SDLK_DOWN:
+						SDL_SetWindowPosition(window, width, height - 50);
+						break;
+					case SDLK_UP:
+						SDL_SetWindowPosition(window, width, height + 50);
+						break;
+					}
+					break;
+				}
+				case SDL_QUIT:
 					stop = true;
+					break;
+				default:
+					break;
 				}
+			}
 
-				int width;
-				int height;
-				SDL_GetWindowPosition(window, &width, &height);
-				switch(key) {
-				case SDLK_RIGHT:
-					SDL_SetWindowPosition(window, width - 50, height);
-					break;
-				case SDLK_LEFT:
-					SDL_SetWindowPosition(window, width + 50, height);
-					break;
-				case SDLK_DOWN:
-					SDL_SetWindowPosition(window, width, height - 50);
-					break;
-				case SDLK_UP:
-					SDL_SetWindowPosition(window, width, height + 50);
-					break;
+			canvas->drawImage(level_overworld_image[data_id]->asImage(), 0, 0);
+			if(level_subworld_image.contains(data_id)) {
+				canvas->drawImage(
+					level_subworld_image[data_id]->asImage(), 0, level_overworld_image[data_id]->height());
+			}
+
+			// Draw all players
+			// canvas->scale()
+			int players_rendered = 0;
+			for(auto& ninji : ninji_paths[data_id]) {
+				if(ninji.second.size() > player_update) {
+					// auto& player = player_info[ninji.first];
+					auto& player_global = player_local_info[data_id][ninji.first];
+
+					auto& frame = ninji.second[player_update];
+					if(ninji_is_subworld[data_id][ninji.first]) {
+						canvas->drawImage(player_image[player_global.charactor][frame.state]->asImage(),
+							frame.x / 16 - 8 * 13,
+							level_subworld_image[data_id]->height() - (frame.y / 16 - 16 * 5)
+								+ level_overworld_image[data_id]->height());
+					} else {
+						canvas->drawImage(player_image[player_global.charactor][frame.state]->asImage(),
+							frame.x / 16 - 8 * 13, level_overworld_image[data_id]->height() - (frame.y / 16 - 16 * 5));
+					}
+
+					if(frame.info == NinjiFrameInfo::PIPE_SUBWORLD) {
+						ninji_is_subworld[data_id][ninji.first] = true;
+					}
+
+					if(frame.info == NinjiFrameInfo::PIPE_OVERWORLD) {
+						ninji_is_subworld[data_id][ninji.first] = false;
+					}
+
+					players_rendered++;
+
+					// std::cout << "Draw player " << player.name << " at " << (frame.x / 16) << " " << (frame.y / 16)
+					// << std::endl;
 				}
+			}
+
+			if(player_update_frame == 1) {
+				player_update_frame = 0;
+				player_update++;
+			}
+
+			canvas->flush();
+			SDL_GL_SwapWindow(window);
+			frame++;
+			player_update_frame++;
+
+			if(players_rendered == 0) {
 				break;
 			}
-			case SDL_QUIT:
-				stop = true;
-				break;
-			default:
-				break;
-			}
 		}
-
-		canvas->drawImage(level_overworld_image[data_id]->asImage(), 0, 0);
-		if(level_subworld_image.contains(data_id)) {
-			canvas->drawImage(level_subworld_image[data_id]->asImage(), 0, level_overworld_image[data_id]->height());
-		}
-
-		// Draw all players
-		// canvas->scale()
-		for(auto& ninji : ninji_paths[data_id]) {
-			if(ninji.second.size() > player_update) {
-				// auto& player = player_info[ninji.first];
-				auto& frame = ninji.second[player_update];
-				if(ninji_is_subworld[data_id][ninji.first]) {
-					canvas->drawImage(player_image[0][frame.state]->asImage(), frame.x / 16 - 8 * 13,
-						level_subworld_image[data_id]->height() - (frame.y / 16 - 16 * 5)
-							+ level_overworld_image[data_id]->height());
-				} else {
-					canvas->drawImage(player_image[0][frame.state]->asImage(), frame.x / 16 - 8 * 13,
-						level_overworld_image[data_id]->height() - (frame.y / 16 - 16 * 5));
-				}
-
-				if(frame.info == NinjiFrameInfo::PIPE_SUBWORLD) {
-					ninji_is_subworld[data_id][ninji.first] = true;
-				}
-
-				if(frame.info == NinjiFrameInfo::PIPE_OVERWORLD) {
-					ninji_is_subworld[data_id][ninji.first] = false;
-				}
-
-				// std::cout << "Draw player " << player.name << " at " << (frame.x / 16) << " " << (frame.y / 16)  <<
-				// std::endl;
-			}
-		}
-
-		if(player_update_frame == 1) {
-			player_update_frame = 0;
-			player_update++;
-		}
-
-		canvas->flush();
-		SDL_GL_SwapWindow(window);
-		frame++;
-		player_update_frame++;
 	}
 
 	if(glContext) {
