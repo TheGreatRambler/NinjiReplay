@@ -25,6 +25,10 @@
 #include <utils/SkRandom.h>
 #include <zlib.h>
 
+#ifdef WIN32
+#include <Windows.h>
+#endif
+
 #if defined(SK_BUILD_FOR_ANDROID)
 #include <EGL/egl.h>
 #include <GLES2/gl2.h>
@@ -169,6 +173,10 @@ void downloadMiis(std::vector<std::string>& miis_to_download, std::vector<int>& 
 }
 
 int main(int argc, char* argv[]) {
+#ifdef WIN32
+	SetConsoleOutputCP(CP_UTF8);
+#endif
+
 	std::cout << "Starting" << std::endl;
 
 	sqlite3* db;
@@ -409,7 +417,7 @@ int main(int argc, char* argv[]) {
 					i++;
 				}
 
-				if(pid_to_player.size() == 1000) {
+				if(pid_to_player.size() == 10000) {
 					// Break early for testing
 					std::cout << "Ending early for testing" << std::endl;
 					break;
@@ -418,7 +426,7 @@ int main(int argc, char* argv[]) {
 
 			row++;
 
-			if(row % 10000 == 0) {
+			if(row % 1000 == 0) {
 				std::cout << "Handled ninji row " << row << std::endl;
 			}
 		} else if(step == SQLITE_DONE) {
@@ -442,7 +450,6 @@ int main(int argc, char* argv[]) {
 	std::unordered_set<std::string> used_flags;
 
 	row = 0;
-	/*
 	for(auto& player : pid_to_player) {
 		sqlite3_bind_text(res, 1, player.first.c_str(), player.first.size(), NULL);
 
@@ -467,14 +474,13 @@ int main(int argc, char* argv[]) {
 
 		row++;
 
-		if(row % 10000 == 0) {
+		if(row % 1000 == 0) {
 			std::cout << "Handled user row " << row << std::endl;
 		}
 
 		sqlite3_reset(res);
 		sqlite3_clear_bindings(res);
 	}
-	*/
 
 	sqlite3_finalize(res);
 	sqlite3_close(db);
@@ -747,8 +753,9 @@ int main(int argc, char* argv[]) {
 	// offscreen->restore();
 	// sk_sp<SkImage> image = cpuSurface->makeImageSnapshot();
 
-	int rotation = 0;
-	SkFont font;
+	SkFont font(SkTypeface::MakeFromFile("../assets/fonts/NotoSansJP-Regular.otf"));
+	font.setSize(10);
+
 	bool stop = false;
 	for(auto data_id : levels_to_render) {
 		int frame               = 0;
@@ -804,19 +811,24 @@ int main(int argc, char* argv[]) {
 			int players_rendered = 0;
 			for(auto& ninji : ninji_paths[data_id]) {
 				if(ninji.second.size() > player_update) {
-					// auto& player = player_info[ninji.first];
-					auto& player_global = player_local_info[data_id][ninji.first];
+					auto& player       = player_info[ninji.first];
+					auto& player_local = player_local_info[data_id][ninji.first];
 
 					auto& frame = ninji.second[player_update];
+					int x;
+					int y;
 					if(ninji_is_subworld[data_id][ninji.first]) {
-						canvas->drawImage(player_image[player_global.charactor][frame.state]->asImage(),
-							frame.x / 16 - 8 * 13,
-							level_subworld_image[data_id]->height() - (frame.y / 16 - 16 * 5)
-								+ level_overworld_image[data_id]->height());
+						x = frame.x / 16 - 8 * 13;
+						y = level_subworld_image[data_id]->height() - (frame.y / 16 - 16 * 5)
+							+ level_overworld_image[data_id]->height();
 					} else {
-						canvas->drawImage(player_image[player_global.charactor][frame.state]->asImage(),
-							frame.x / 16 - 8 * 13, level_overworld_image[data_id]->height() - (frame.y / 16 - 16 * 5));
+						x = frame.x / 16 - 8 * 13;
+						y = level_overworld_image[data_id]->height() - (frame.y / 16 - 16 * 5);
 					}
+
+					canvas->drawImage(player_image[player_local.charactor][frame.state]->asImage(), x, y);
+					canvas->drawSimpleText(
+						player.name.c_str(), player.name.size(), SkTextEncoding::kUTF8, x + 16, y - 4, font, paint);
 
 					if(frame.info == NinjiFrameInfo::PIPE_SUBWORLD) {
 						ninji_is_subworld[data_id][ninji.first] = true;
@@ -844,6 +856,7 @@ int main(int argc, char* argv[]) {
 			player_update_frame++;
 
 			if(players_rendered == 0) {
+				std::cout << "Finished " << data_id << std::endl;
 				break;
 			}
 		}
