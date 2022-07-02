@@ -25,6 +25,13 @@
 #include <utils/SkRandom.h>
 #include <zlib.h>
 
+extern "C" {
+#include <libavcodec/avcodec.h>
+#include <libavformat/avformat.h>
+#include <libavutil/imgutils.h>
+#include <libavutil/opt.h>
+}
+
 #ifdef WIN32
 #include <Windows.h>
 #endif
@@ -40,6 +47,9 @@
 #elif defined(SK_BUILD_FOR_IOS)
 #include <OpenGLES/ES2/gl.h>
 #endif
+
+#define RENDER_VIDEO 1
+//#define RENDER_SCREEN 1
 
 bool gzip_decompress(uint8_t* input, int input_size, std::vector<uint8_t>& output) {
 	output.clear();
@@ -172,6 +182,34 @@ void downloadMiis(std::vector<std::string>& miis_to_download, std::vector<int>& 
 	curl_global_cleanup();
 }
 
+void encode_frame(AVFormatContext* fmt_ctx, AVCodecContext* enc_ctx, AVFrame* frame, AVPacket* pkt, AVStream* stream) {
+	int ret;
+	/* send the frame to the encoder */
+	if(frame)
+		printf("Send frame %3" PRId64 "\n", frame->pts);
+	ret = avcodec_send_frame(enc_ctx, frame);
+	if(ret < 0) {
+		fprintf(stderr, "Error sending a frame for encoding\n");
+		exit(1);
+	}
+	while(ret >= 0) {
+		ret = avcodec_receive_packet(enc_ctx, pkt);
+		if(ret == AVERROR(EAGAIN) || ret == AVERROR_EOF)
+			return;
+		else if(ret < 0) {
+			fprintf(stderr, "Error during encoding\n");
+			exit(1);
+		}
+
+		av_packet_rescale_ts(pkt, enc_ctx->time_base, stream->time_base);
+		pkt->stream_index = stream->index;
+
+		printf("Write packet %3" PRId64 " (size=%5d)\n", pkt->pts, pkt->size);
+		/* Write the compressed frame to the media file. */
+		ret = av_interleaved_write_frame(fmt_ctx, pkt);
+	}
+}
+
 int main(int argc, char* argv[]) {
 #ifdef WIN32
 	SetConsoleOutputCP(CP_UTF8);
@@ -199,12 +237,11 @@ int main(int argc, char* argv[]) {
 	}
 
 	enum NinjiFrameInfo : int8_t {
-		NONE           = -1,
-		DEATH_UNK1     = 10,
-		DOOR           = 11,
-		PIPE_SUBWORLD  = 0,
-		PIPE_OVERWORLD = 1,
+		NONE       = -1,
+		DEATH_UNK1 = 10,
+		DOOR       = 11,
 	};
+
 	struct __attribute__((packed, aligned(8))) NinjiFrame {
 		uint8_t state;
 		uint16_t x;
@@ -232,7 +269,31 @@ int main(int argc, char* argv[]) {
 		int start_y;
 	};
 
-	std::unordered_set<int> levels_to_render = { 33883306 };
+	static std::unordered_map<int, std::unordered_set<int>> num_pipes = {
+		{ 33883306, { 0 } },
+		{ 29234075, { 0, 1, 2, 3 } },
+		{ 28460377, { 0, 1, 2 } },
+		{ 27439231, { 0, 1 } },
+		{ 26746705, { 0, 1 } },
+		{ 25984384, { 0, 1 } },
+		//{25459053, } // TODO Toost crashes on this level
+		{ 25045367, { 0, 1 } },
+		{ 24477739, { 0, 1, 2 } },
+		{ 23738173, {} },
+		{ 23303835, {} },
+		{ 22587491, {} },
+		{ 21858065, {} },
+		{ 20182790, {} },
+		{ 17110274, {} },
+		{ 15675466, {} },
+		{ 14827235, { 0, 1 } },
+		{ 14328331, {} },
+		{ 13428950, { 0, 2 } },
+		{ 12619193, { 0, 1 } },
+		{ 12171034, {} },
+	};
+
+	std::unordered_set<int> levels_to_render = { 29234075 };
 	std::unordered_map<int, std::unordered_map<int, std::vector<NinjiFrame>>> ninji_paths;
 	std::unordered_map<int, std::unordered_map<int, bool>> ninji_is_subworld;
 	int current_player_index = 0;
@@ -375,18 +436,21 @@ int main(int argc, char* argv[]) {
 								test = *(uint32_t*)&decompressed_replay[0x34];
 								toLittleEndian(test);
 								std::cout << "0x34: " << test << std::endl;
-
-								if(!level_bounds.contains(data_id)) {
-									level_bounds[data_id] = LevelBounds {};
-								}
 								*/
+
+				// if(!level_bounds.contains(data_id)) {
+				//	level_bounds[data_id] = LevelBounds {};
+				// }
 
 				uint8_t charactor                  = decompressed_replay[0x14];
 				player_local_info[data_id][player] = NinjiGlobalInfo { charactor };
+				uint32_t frames_size               = *(uint32_t*)&decompressed_replay[0x10];
+				toLittleEndian(frames_size);
+				// Ninji's are rendered every 4 frames, 2 is because the frames is always two less than it should be
+				frames_size = (frames_size + 2) / 4;
 
 				size_t current_offset = 0x3C;
-				int i                 = 0;
-				while(true) {
+				for(int i = 0; i < frames_size; i++) {
 					uint8_t flags        = decompressed_replay[current_offset] >> 4;
 					uint8_t player_state = decompressed_replay[current_offset] & 0x0F;
 					current_offset++;
@@ -406,22 +470,13 @@ int main(int argc, char* argv[]) {
 					} else {
 						ninji_paths[data_id][player].push_back(NinjiFrame { player_state, x, y });
 					}
-
-					if(x == 0 && y == 0) {
-						// Very likely the last frame, end
-						// std::cout << i << std::endl;
-						break;
-					}
-
-					// std::cout << x << " " << y << std::endl;
-					i++;
 				}
 
-				if(pid_to_player.size() == 10000) {
-					// Break early for testing
-					std::cout << "Ending early for testing" << std::endl;
-					break;
-				}
+				// if(pid_to_player.size() == 10000) {
+				//	// Break early for testing
+				//	std::cout << "Ending early for testing" << std::endl;
+				//	break;
+				// }
 			}
 
 			row++;
@@ -601,6 +656,8 @@ int main(int argc, char* argv[]) {
 	SkPaint paint;
 	paint.setAntiAlias(false);
 
+#ifdef RENDER_SCREEN
+
 	// canvas.drawBitmap(Bitmap, 0, 0, &paint);
 
 	// Start rendering to screen
@@ -753,17 +810,100 @@ int main(int argc, char* argv[]) {
 	// offscreen->restore();
 	// sk_sp<SkImage> image = cpuSurface->makeImageSnapshot();
 
+	SDL_SetWindowPosition(window, 0, 0);
+#endif
+
+#ifdef RENDER_VIDEO
+	int width        = 3840;
+	int height       = 432 + 2688;
+	SkImageInfo info = SkImageInfo::Make(width, height, kRGB_888x_SkColorType, kPremul_SkAlphaType);
+	size_t rowBytes  = info.minRowBytes();
+	std::vector<uint8_t> pixelMemory(rowBytes * height);
+	sk_sp<SkSurface> surface = SkSurface::MakeRasterDirect(info, pixelMemory.data(), rowBytes);
+	SkCanvas* canvas         = surface->getCanvas();
+
+	uint8_t endcode[] = { 0, 0, 1, 0xb7 };
+
+	const AVCodec* codec = avcodec_find_encoder_by_name("libx264rgb");
+	if(!codec) {
+		fprintf(stderr, "Codec not found\n");
+		exit(1);
+	}
+
+	AVCodecContext* codec_context = avcodec_alloc_context3(codec);
+	if(!codec_context) {
+		fprintf(stderr, "Could not allocate video codec context\n");
+		exit(1);
+	}
+
+	/* resolution must be a multiple of two */
+	codec_context->width  = width;
+	codec_context->height = height;
+	/* frames per second */
+	codec_context->time_base = (AVRational) { 1, 60 };
+	codec_context->framerate = (AVRational) { 60, 1 };
+	/* emit one intra frame every ten frames
+	 * check frame pict_type before passing frame
+	 * to encoder, if frame->pict_type is AV_PICTURE_TYPE_I
+	 * then gop_size is ignored and the output of encoder
+	 * will always be I frame irrespective to gop_size
+	 */
+	codec_context->gop_size     = 10;
+	codec_context->max_b_frames = 1;
+	codec_context->pix_fmt      = AV_PIX_FMT_RGB24;
+	av_opt_set(codec_context->priv_data, "crf", "17", 0);
+	av_opt_set(codec_context->priv_data, "preset", "slow", 0);
+
+	/* open it */
+	if(avcodec_open2(codec_context, codec, NULL) < 0) {
+		fprintf(stderr, "Could not open codec\n");
+		exit(1);
+	}
+
+	AVFrame* video_frame = av_frame_alloc();
+	if(!video_frame) {
+		fprintf(stderr, "Could not allocate video frame\n");
+		exit(1);
+	}
+	video_frame->format = codec_context->pix_fmt;
+	video_frame->width  = codec_context->width;
+	video_frame->height = codec_context->height;
+
+	/* the image can be allocated by any means and av_image_alloc() is
+	 * just the most convenient way if av_malloc() is to be used */
+	av_frame_get_buffer(video_frame, 32);
+#endif
+
 	SkFont font(SkTypeface::MakeFromFile("../assets/fonts/NotoSansJP-Regular.otf"));
 	font.setSize(10);
 
-	bool stop = false;
+	int frame = 0;
 	for(auto data_id : levels_to_render) {
-		int frame               = 0;
 		int player_update_frame = 0;
 		int player_update       = 0;
+		bool stop               = false;
+
+#ifdef RENDER_VIDEO
+		AVPacket* pkt = av_packet_alloc();
+
+		std::string filename = std::to_string(data_id) + ".mp4";
+
+		AVFormatContext* oc;
+		avformat_alloc_output_context2(&oc, NULL, NULL, filename.c_str());
+		const AVOutputFormat* fmt = oc->oformat;
+
+		AVStream* stream = avformat_new_stream(oc, NULL);
+		avcodec_parameters_from_context(stream->codecpar, codec_context);
+		stream->time_base = (AVRational) { 1, 60 };
+
+		avio_open(&oc->pb, filename.c_str(), AVIO_FLAG_WRITE);
+		avformat_write_header(oc, NULL);
+#endif
+
 		while(!stop) {
 			canvas->clear(SK_ColorWHITE);
 
+#ifdef RENDER_SCREEN
 			SDL_Event event;
 			while(SDL_PollEvent(&event)) {
 				switch(event.type) {
@@ -799,6 +939,7 @@ int main(int argc, char* argv[]) {
 					break;
 				}
 			}
+#endif
 
 			canvas->drawImage(level_overworld_image[data_id]->asImage(), 0, 0);
 			if(level_subworld_image.contains(data_id)) {
@@ -830,12 +971,8 @@ int main(int argc, char* argv[]) {
 					canvas->drawSimpleText(
 						player.name.c_str(), player.name.size(), SkTextEncoding::kUTF8, x + 16, y - 4, font, paint);
 
-					if(frame.info == NinjiFrameInfo::PIPE_SUBWORLD) {
-						ninji_is_subworld[data_id][ninji.first] = true;
-					}
-
-					if(frame.info == NinjiFrameInfo::PIPE_OVERWORLD) {
-						ninji_is_subworld[data_id][ninji.first] = false;
+					if(num_pipes[data_id].contains((int)frame.info)) {
+						ninji_is_subworld[data_id][ninji.first] = !ninji_is_subworld[data_id][ninji.first];
 					}
 
 					players_rendered++;
@@ -851,17 +988,53 @@ int main(int argc, char* argv[]) {
 			}
 
 			canvas->flush();
-			SDL_GL_SwapWindow(window);
 			frame++;
 			player_update_frame++;
 
 			if(players_rendered == 0) {
 				std::cout << "Finished " << data_id << std::endl;
-				break;
+				stop = true;
 			}
+
+#ifdef RENDER_VIDEO
+			// if(!surface->readPixels(info, &video_frame->data[0], rowBytes, 0, 0)) {
+			//	std::cout << "Could not write frame to video" << std::endl;
+			// }
+			for(int y = 0; y < height; y++) {
+				for(int x = 0; x < width; x++) {
+					memcpy(&video_frame->data[0][(y * width + x) * 3], &pixelMemory[(y * width + x) * 4], 3);
+				}
+			}
+			// memcpy(&video_frame->data[0], pixelMemory.data(), pixelMemory.size());
+			video_frame->pts = frame;
+
+			encode_frame(oc, codec_context, video_frame, pkt, stream);
+#endif
+
+#ifdef RENDER_SCREEN
+			SDL_GL_SwapWindow(window);
+#endif
 		}
+
+#ifdef RENDER_VIDEO
+		encode_frame(oc, codec_context, NULL, pkt, stream);
+
+		av_write_trailer(oc);
+		avio_closep(&oc->pb);
+		av_packet_free(&pkt);
+		avformat_free_context(oc);
+#endif
 	}
 
+	std::cout << "Finished all levels" << std::endl;
+
+#ifdef RENDER_VIDEO
+	avcodec_free_context(&codec_context);
+	av_freep(&video_frame->data[0]);
+	av_frame_free(&video_frame);
+#endif
+
+#ifdef RENDER_SCREEN
 	if(glContext) {
 		SDL_GL_DeleteContext(glContext);
 	}
@@ -871,6 +1044,7 @@ int main(int argc, char* argv[]) {
 
 	// Quit SDL subsystems
 	SDL_Quit();
+#endif
 
 	return 0;
 }

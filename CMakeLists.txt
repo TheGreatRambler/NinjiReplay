@@ -63,12 +63,34 @@ execute_process(
 		${CMAKE_CURRENT_BINARY_DIR}/third_party/sdl/SDL2d.dll
 		${CMAKE_CURRENT_BINARY_DIR}/SDL2d.dll)
 
+# FFmpeg for rendering the final video
+set(AVCODEC_LIB ${CMAKE_CURRENT_SOURCE_DIR}/third_party/ffmpeg/lib/avcodec.lib)
+set(AVUTIL_LIB ${CMAKE_CURRENT_SOURCE_DIR}/third_party/ffmpeg/lib/avutil.lib)
+set(AVFORMAT_LIB ${CMAKE_CURRENT_SOURCE_DIR}/third_party/ffmpeg/lib/avformat.lib)
+execute_process(
+	COMMAND ${CMAKE_COMMAND} -E copy
+		${CMAKE_CURRENT_SOURCE_DIR}/third_party/ffmpeg/bin/avcodec-59.dll
+		${CMAKE_CURRENT_BINARY_DIR}/avcodec-59.dll)
+execute_process(
+	COMMAND ${CMAKE_COMMAND} -E copy
+		${CMAKE_CURRENT_SOURCE_DIR}/third_party/ffmpeg/bin/avutil-57.dll
+		${CMAKE_CURRENT_BINARY_DIR}/avutil-57.dll)
+execute_process(
+	COMMAND ${CMAKE_COMMAND} -E copy
+		${CMAKE_CURRENT_SOURCE_DIR}/third_party/ffmpeg/bin/swresample-4.dll
+		${CMAKE_CURRENT_BINARY_DIR}/swresample-4.dll)
+execute_process(
+	COMMAND ${CMAKE_COMMAND} -E copy
+		${CMAKE_CURRENT_SOURCE_DIR}/third_party/ffmpeg/bin/avformat-59.dll
+		${CMAKE_CURRENT_BINARY_DIR}/avformat-59.dll)
+set(FFMPEG_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/third_party/ffmpeg/include)
+
 add_executable(ninjireplay ${APPLICATION_TYPE}
 	src/glad.c
 	src/main.cpp
 )
 
-target_include_directories(ninjireplay PUBLIC include src ${SKIA_DIR} ${SKIA_DIR}/include ${CMAKE_CURRENT_BINARY_DIR}/third_party/zlib ${CMAKE_CURRENT_SOURCE_DIR}/third_party/zlib ${CMAKE_CURRENT_SOURCE_DIR}/third_party/sqlite ${CURL_INCLUDE} ${CMAKE_CURRENT_SOURCE_DIR}/third_party/sdl/include)
+target_include_directories(ninjireplay PUBLIC include src ${SKIA_DIR} ${SKIA_DIR}/include ${CMAKE_CURRENT_BINARY_DIR}/third_party/zlib ${CMAKE_CURRENT_SOURCE_DIR}/third_party/zlib ${CMAKE_CURRENT_SOURCE_DIR}/third_party/sqlite ${CURL_INCLUDE} ${FFMPEG_INCLUDE} ${CMAKE_CURRENT_SOURCE_DIR}/third_party/sdl/include)
 target_compile_options(ninjireplay PRIVATE -Wall -Wextra)
 
 set_target_properties(ninjireplay PROPERTIES
@@ -77,4 +99,4 @@ set_target_properties(ninjireplay PROPERTIES
 		CXX_VISIBILITY_PRESET hidden
 		POSITION_INDEPENDENT_CODE ON)
 
-target_link_libraries(ninjireplay PUBLIC ${SKIA_LINK}/skia.lib sqlite zlib ${CURL_LIB} SDL2 SDL2main gdi32 opengl32)
+target_link_libraries(ninjireplay PUBLIC ${SKIA_LINK}/skia.lib sqlite zlib ${CURL_LIB} SDL2 SDL2main ${AVCODEC_LIB} ${AVUTIL_LIB} ${AVFORMAT_LIB} gdi32 opengl32)
