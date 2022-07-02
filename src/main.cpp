@@ -48,8 +48,8 @@ extern "C" {
 #include <OpenGLES/ES2/gl.h>
 #endif
 
-#define RENDER_VIDEO 1
-//#define RENDER_SCREEN 1
+//#define RENDER_VIDEO 1
+#define RENDER_SCREEN 1
 
 bool gzip_decompress(uint8_t* input, int input_size, std::vector<uint8_t>& output) {
 	output.clear();
@@ -269,19 +269,19 @@ int main(int argc, char* argv[]) {
 		int start_y;
 	};
 
-	static std::unordered_map<int, std::unordered_set<int>> num_pipes = {
+	static std::unordered_map<int, std::unordered_set<int>> pipes = {
 		{ 33883306, { 0 } },
-		{ 29234075, { 0, 1, 2, 3 } },
+		{ 29234075, { 0, 2, 3 } },
 		{ 28460377, { 0, 1, 2 } },
 		{ 27439231, { 0, 1 } },
 		{ 26746705, { 0, 1 } },
 		{ 25984384, { 0, 1 } },
-		//{25459053, } // TODO Toost crashes on this level
+		{ 25459053, { 0, 1 } },
 		{ 25045367, { 0, 1 } },
 		{ 24477739, { 0, 1, 2 } },
 		{ 23738173, {} },
 		{ 23303835, {} },
-		{ 22587491, {} },
+		{ 22587491, { 0, 1 } },
 		{ 21858065, {} },
 		{ 20182790, {} },
 		{ 17110274, {} },
@@ -293,7 +293,292 @@ int main(int argc, char* argv[]) {
 		{ 12171034, {} },
 	};
 
-	std::unordered_set<int> levels_to_render = { 29234075 };
+	static std::unordered_map<int, std::string> gamestyle = {
+		{ 33883306, "smb1" },
+		{ 29234075, "nsmbu" },
+		{ 28460377, "smw" },
+		{ 27439231, "smb3" }, // File format broken
+		{ 26746705, "smb1" },
+		{ 25984384, "smw" },
+		{ 25459053, "sm3dw" },
+		{ 25045367, "smb1" },
+		{ 24477739, "smb3" },
+		{ 23738173, "nsmbu" },
+		{ 23303835, "smb3" },
+		{ 22587491, "sm3dw" },
+		{ 21858065, "nsmbu" },
+		{ 20182790, "smw" },
+		{ 17110274, "sm3dw" },
+		{ 15675466, "smb3" },
+		{ 14827235, "smw" },
+		{ 14328331, "sm3dw" },
+		{ 13428950, "nsmbu" },
+		{ 12619193, "smb1" },
+		{ 12171034, "nsmbu" },
+	};
+
+	static std::unordered_map<std::string, int> country_flags = {
+		{ "AC", 0 },
+		{ "AD", 1 },
+		{ "AE", 2 },
+		{ "AF", 3 },
+		{ "AG", 4 },
+		{ "AI", 5 },
+		{ "AL", 6 },
+		{ "AM", 7 },
+		{ "AO", 8 },
+		{ "AQ", 9 },
+		{ "AR", 10 },
+		{ "AS", 11 },
+		{ "AT", 12 },
+		{ "AU", 13 },
+		{ "AW", 14 },
+		{ "AX", 15 },
+		{ "AZ", 16 },
+		{ "BA", 17 },
+		{ "BB", 18 },
+		{ "BD", 19 },
+		{ "BE", 20 },
+		{ "BF", 21 },
+		{ "BG", 22 },
+		{ "BH", 23 },
+		{ "BI", 24 },
+		{ "BJ", 25 },
+		{ "BL", 26 },
+		{ "BM", 27 },
+		{ "BN", 28 },
+		{ "BO", 29 },
+		{ "BQ", 30 },
+		{ "BR", 31 },
+		{ "BS", 32 },
+		{ "BT", 33 },
+		{ "BV", 34 },
+		{ "BW", 35 },
+		{ "BY", 36 },
+		{ "BZ", 37 },
+		{ "CA", 38 },
+		{ "CC", 39 },
+		{ "CD", 40 },
+		{ "CF", 41 },
+		{ "CG", 42 },
+		{ "CH", 43 },
+		{ "CI", 44 },
+		{ "CK", 45 },
+		{ "CL", 46 },
+		{ "CM", 47 },
+		{ "CN", 48 },
+		{ "CO", 49 },
+		{ "CP", 50 },
+		{ "CR", 51 },
+		{ "CU", 52 },
+		{ "CV", 53 },
+		{ "CW", 54 },
+		{ "CX", 55 },
+		{ "CY", 56 },
+		{ "CZ", 57 },
+		{ "DE", 58 },
+		{ "DG", 59 },
+		{ "DJ", 60 },
+		{ "DK", 61 },
+		{ "DM", 62 },
+		{ "DO", 63 },
+		{ "DZ", 64 },
+		{ "EA", 65 },
+		{ "EC", 66 },
+		{ "EE", 67 },
+		{ "EG", 68 },
+		{ "EH", 69 },
+		{ "ER", 70 },
+		{ "ES", 71 },
+		{ "ET", 72 },
+		{ "EU", 73 },
+		{ "FI", 74 },
+		{ "FJ", 75 },
+		{ "FK", 76 },
+		{ "FM", 77 },
+		{ "FO", 78 },
+		{ "FR", 79 },
+		{ "GA", 80 },
+		{ "GB", 81 },
+		{ "GD", 82 },
+		{ "GE", 83 },
+		{ "GF", 84 },
+		{ "GG", 85 },
+		{ "GH", 86 },
+		{ "GI", 87 },
+		{ "GL", 88 },
+		{ "GM", 89 },
+		{ "GN", 90 },
+		{ "GP", 91 },
+		{ "GQ", 92 },
+		{ "GR", 93 },
+		{ "GS", 94 },
+		{ "GT", 95 },
+		{ "GU", 96 },
+		{ "GW", 97 },
+		{ "GY", 98 },
+		{ "HK", 99 },
+		{ "HM", 100 },
+		{ "HN", 101 },
+		{ "HR", 102 },
+		{ "HT", 103 },
+		{ "HU", 104 },
+		{ "IC", 105 },
+		{ "ID", 106 },
+		{ "IE", 107 },
+		{ "IL", 108 },
+		{ "IM", 109 },
+		{ "IN", 110 },
+		{ "IO", 111 },
+		{ "IQ", 112 },
+		{ "IR", 113 },
+		{ "IS", 114 },
+		{ "IT", 115 },
+		{ "JE", 116 },
+		{ "JM", 117 },
+		{ "JO", 118 },
+		{ "JP", 119 },
+		{ "KE", 120 },
+		{ "KG", 121 },
+		{ "KH", 122 },
+		{ "KI", 123 },
+		{ "KM", 124 },
+		{ "KN", 125 },
+		{ "KP", 126 },
+		{ "KR", 127 },
+		{ "KW", 128 },
+		{ "KY", 129 },
+		{ "KZ", 130 },
+		{ "LA", 131 },
+		{ "LB", 132 },
+		{ "LC", 133 },
+		{ "LI", 134 },
+		{ "LK", 135 },
+		{ "LR", 136 },
+		{ "LS", 137 },
+		{ "LT", 138 },
+		{ "LU", 139 },
+		{ "LV", 140 },
+		{ "LY", 141 },
+		{ "MA", 142 },
+		{ "MC", 143 },
+		{ "MD", 144 },
+		{ "ME", 145 },
+		{ "MF", 146 },
+		{ "MG", 147 },
+		{ "MH", 148 },
+		{ "MK", 149 },
+		{ "ML", 150 },
+		{ "MM", 151 },
+		{ "MN", 152 },
+		{ "MO", 153 },
+		{ "MP", 154 },
+		{ "MQ", 155 },
+		{ "MR", 156 },
+		{ "MS", 157 },
+		{ "MT", 158 },
+		{ "MU", 159 },
+		{ "MV", 160 },
+		{ "MW", 161 },
+		{ "MX", 162 },
+		{ "MY", 163 },
+		{ "MZ", 164 },
+		{ "NA", 165 },
+		{ "NC", 166 },
+		{ "NE", 167 },
+		{ "NF", 168 },
+		{ "NG", 169 },
+		{ "NI", 170 },
+		{ "NL", 171 },
+		{ "NO", 172 },
+		{ "NP", 173 },
+		{ "NR", 174 },
+		{ "NU", 175 },
+		{ "NZ", 176 },
+		{ "OM", 177 },
+		{ "PA", 178 },
+		{ "PE", 179 },
+		{ "PF", 180 },
+		{ "PG", 181 },
+		{ "PH", 182 },
+		{ "PK", 183 },
+		{ "PL", 184 },
+		{ "PM", 185 },
+		{ "PN", 186 },
+		{ "PR", 187 },
+		{ "PS", 188 },
+		{ "PT", 189 },
+		{ "PW", 190 },
+		{ "PY", 191 },
+		{ "QA", 192 },
+		{ "RE", 193 },
+		{ "RO", 194 },
+		{ "RS", 195 },
+		{ "RU", 196 },
+		{ "RW", 197 },
+		{ "SA", 198 },
+		{ "SB", 199 },
+		{ "SC", 200 },
+		{ "SD", 201 },
+		{ "SE", 202 },
+		{ "SG", 203 },
+		{ "SH", 204 },
+		{ "SI", 205 },
+		{ "SJ", 206 },
+		{ "SK", 207 },
+		{ "SL", 208 },
+		{ "SM", 209 },
+		{ "SN", 210 },
+		{ "SO", 211 },
+		{ "SR", 212 },
+		{ "SS", 213 },
+		{ "ST", 214 },
+		{ "SV", 215 },
+		{ "SX", 216 },
+		{ "SY", 217 },
+		{ "SZ", 218 },
+		{ "TA", 219 },
+		{ "TC", 220 },
+		{ "TD", 221 },
+		{ "TF", 222 },
+		{ "TG", 223 },
+		{ "TH", 224 },
+		{ "TJ", 225 },
+		{ "TK", 226 },
+		{ "TL", 227 },
+		{ "TM", 228 },
+		{ "TN", 229 },
+		{ "TO", 230 },
+		{ "TR", 231 },
+		{ "TT", 232 },
+		{ "TV", 233 },
+		{ "TW", 234 },
+		{ "TZ", 235 },
+		{ "UA", 236 },
+		{ "UG", 237 },
+		{ "UM", 238 },
+		{ "UN", 239 },
+		{ "US", 240 },
+		{ "UY", 241 },
+		{ "UZ", 242 },
+		{ "VA", 243 },
+		{ "VC", 244 },
+		{ "VE", 245 },
+		{ "VG", 246 },
+		{ "VI", 247 },
+		{ "VN", 248 },
+		{ "VU", 249 },
+		{ "WF", 250 },
+		{ "WS", 251 },
+		{ "XK", 252 },
+		{ "YE", 253 },
+		{ "YT", 254 },
+		{ "ZA", 255 },
+		{ "ZM", 256 },
+		{ "ZW", 257 },
+	};
+
+	std::unordered_set<int> levels_to_render = { 26746705 };
 	std::unordered_map<int, std::unordered_map<int, std::vector<NinjiFrame>>> ninji_paths;
 	std::unordered_map<int, std::unordered_map<int, bool>> ninji_is_subworld;
 	int current_player_index = 0;
@@ -467,16 +752,21 @@ int main(int argc, char* argv[]) {
 						//	std::cout << "NEW " << (int)unk1 << std::endl;
 						//	unique_states.emplace(unk1);
 						// }
+						// if(x & 7 != 1) {
+						//	uint16_t unk2 = *(uint16_t*)&decompressed_replay[current_offset];
+						//	current_offset += 2;
+						//	toLittleEndianShort(unk2);
+						//}
 					} else {
 						ninji_paths[data_id][player].push_back(NinjiFrame { player_state, x, y });
 					}
 				}
 
-				// if(pid_to_player.size() == 10000) {
-				//	// Break early for testing
-				//	std::cout << "Ending early for testing" << std::endl;
-				//	break;
-				// }
+				if(pid_to_player.size() == 1000) {
+					// Break early for testing
+					std::cout << "Ending early for testing" << std::endl;
+					break;
+				}
 			}
 
 			row++;
@@ -565,50 +855,56 @@ int main(int argc, char* argv[]) {
 	mii_images.clear();
 
 	// Create images for players
-	std::unordered_map<int, std::unordered_map<int, SkBitmap*>> player_image;
-	for(int player = 0; player < 4; player++) {
-		std::string player_name;
-		switch(player) {
-		case 0:
-			player_name = "mario";
-			break;
-		case 1:
-			player_name = "luigi";
-			break;
-		case 2:
-			player_name = "toad";
-			break;
-		case 3:
-			player_name = "toadette";
-			break;
-		}
+	std::unordered_map<int, std::unordered_map<int, std::unordered_map<int, SkBitmap*>>> player_image;
+	for(auto data_id : levels_to_render) {
+		for(int player = 0; player < 4; player++) {
+			std::string player_name;
+			switch(player) {
+			case 0:
+				player_name = "mario";
+				break;
+			case 1:
+				player_name = "luigi";
+				break;
+			case 2:
+				player_name = "toad";
+				break;
+			case 3:
+				player_name = "toadette";
+				break;
+			}
 
-		// https://github.com/kinnay/Nintendo-File-Formats/wiki/SMM-2-Ninji-Ghosts#player-state
-		for(int state = 0; state < 16; state++) {
-			// TODO some states have multiple possible states within them (eg walking)
-			// Gamestyles also change images
-			// 0 (standing, walking, running): column 3 row 2
-			// 1 (jumping): column 7 row 2
-			// 2 (swimming): column 10 row 2
-			// 3 (climbing): column 14 row 2
-			// 4 ("hipat" and link down slash): NONE
-			// 5 (slipping): column 15 row 2
-			// 6 ("wsld"): NONE
-			// 7 (clear pipe and dry bones): column 17 row 2 second dry bones
-			// 8 (cat attack and clown car): column 19 row 2 clown car in folder
-			// 9 (tree top and lakitu cloud): column 19 row 2 cloud in other spritesheet
-			// 10 (goomba shoe, koopa troopa, or yoshi): column 19 row 2 yoshi in other spritesheet
-			// 11 (walking cat): column 3 row 2
-			// 12 (unknown)
-			SkBitmap* bitmap = new SkBitmap();
-			std::string filename
-				= (std::string("../assets/players/") + player_name + "/" + std::to_string(state) + ".png").c_str();
-			std::unique_ptr<SkCodec> player_sprite = SkCodec::MakeFromStream(SkStream::MakeFromFile(filename.c_str()));
-			SkImageInfo info                       = player_sprite->getInfo().makeColorType(kBGRA_8888_SkColorType);
-			bitmap->allocPixels(info);
-			player_sprite->getPixels(info, bitmap->getPixels(), bitmap->rowBytes());
-			bitmap->setImmutable();
-			player_image[player][state] = bitmap;
+			// https://github.com/kinnay/Nintendo-File-Formats/wiki/SMM-2-Ninji-Ghosts#player-state
+			for(int state = 0; state < 16; state++) {
+				// TODO some states have multiple possible states within them (eg walking)
+				// Gamestyles also change images
+				// 0 (standing, walking, running): column 3 row 2
+				// 1 (jumping): column 7 row 2
+				// 2 (swimming): column 10 row 2
+				// 3 (climbing): column 14 row 2
+				// 4 ("hipat" and link down slash): NONE
+				// 5 (slipping): column 15 row 2
+				// 6 ("wsld"): NONE
+				// 7 (clear pipe and dry bones): column 17 row 2 second dry bones
+				// 8 (cat attack and clown car): column 19 row 2 clown car in folder
+				// 9 (tree top and lakitu cloud): column 19 row 2 cloud in other spritesheet
+				// 10 (goomba shoe, koopa troopa, or yoshi): column 19 row 2 yoshi in other spritesheet
+				// 11 (walking cat): column 3 row 2
+				// 12 (unknown)
+				SkBitmap* bitmap     = new SkBitmap();
+				std::string filename = std::string("../assets/players/") + player_name + "/" + gamestyle[data_id] + "/"
+									   + std::to_string(state) + ".png";
+				if(!std::filesystem::exists(filename)) {
+					filename = std::string("../assets/players/") + player_name + "/" + std::to_string(state) + ".png";
+				}
+				std::unique_ptr<SkCodec> player_sprite
+					= SkCodec::MakeFromStream(SkStream::MakeFromFile(filename.c_str()));
+				SkImageInfo info = player_sprite->getInfo().makeColorType(kBGRA_8888_SkColorType);
+				bitmap->allocPixels(info);
+				player_sprite->getPixels(info, bitmap->getPixels(), bitmap->rowBytes());
+				bitmap->setImmutable();
+				player_image[data_id][player][state] = bitmap;
+			}
 		}
 	}
 
@@ -655,6 +951,7 @@ int main(int argc, char* argv[]) {
 	// Paint for rendering, preserves pixel art
 	SkPaint paint;
 	paint.setAntiAlias(false);
+	paint.setColor(SK_ColorWHITE);
 
 #ifdef RENDER_SCREEN
 
@@ -900,8 +1197,9 @@ int main(int argc, char* argv[]) {
 		avformat_write_header(oc, NULL);
 #endif
 
+		std::unordered_set<int> seen_states;
 		while(!stop) {
-			canvas->clear(SK_ColorWHITE);
+			canvas->clear(SK_ColorBLACK);
 
 #ifdef RENDER_SCREEN
 			SDL_Event event;
@@ -952,8 +1250,9 @@ int main(int argc, char* argv[]) {
 			int players_rendered = 0;
 			for(auto& ninji : ninji_paths[data_id]) {
 				if(ninji.second.size() > player_update) {
-					auto& player       = player_info[ninji.first];
-					auto& player_local = player_local_info[data_id][ninji.first];
+					auto& player         = player_info[ninji.first];
+					auto& player_local   = player_local_info[data_id][ninji.first];
+					auto& player_sprites = player_image[data_id][player_local.charactor];
 
 					auto& frame = ninji.second[player_update];
 					int x;
@@ -967,12 +1266,17 @@ int main(int argc, char* argv[]) {
 						y = level_overworld_image[data_id]->height() - (frame.y / 16 - 16 * 5);
 					}
 
-					canvas->drawImage(player_image[player_local.charactor][frame.state]->asImage(), x, y);
-					canvas->drawSimpleText(
-						player.name.c_str(), player.name.size(), SkTextEncoding::kUTF8, x + 16, y - 4, font, paint);
+					canvas->drawImage(player_sprites[frame.state]->asImage(), x, y);
+					// canvas->drawSimpleText(
+					//	player.name.c_str(), player.name.size(), SkTextEncoding::kUTF8, x + 16, y - 4, font, paint);
 
-					if(num_pipes[data_id].contains((int)frame.info)) {
+					if(pipes[data_id].contains((int)frame.info)) {
 						ninji_is_subworld[data_id][ninji.first] = !ninji_is_subworld[data_id][ninji.first];
+					}
+
+					if(!seen_states.contains((int)frame.info)) {
+						std::cout << "Seen new state: " << (int)frame.info << std::endl;
+						seen_states.emplace((int)frame.info);
 					}
 
 					players_rendered++;
@@ -982,7 +1286,7 @@ int main(int argc, char* argv[]) {
 				}
 			}
 
-			if(player_update_frame == 1) {
+			if(player_update_frame == 5) {
 				player_update_frame = 0;
 				player_update++;
 			}
