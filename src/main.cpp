@@ -578,7 +578,7 @@ int main(int argc, char* argv[]) {
 		{ "ZW", 257 },
 	};
 
-	std::unordered_set<int> levels_to_render = { 26746705 };
+	std::unordered_set<int> levels_to_render = { 25459053 };
 	std::unordered_map<int, std::unordered_map<int, std::vector<NinjiFrame>>> ninji_paths;
 	std::unordered_map<int, std::unordered_map<int, bool>> ninji_is_subworld;
 	int current_player_index = 0;
@@ -1259,14 +1259,15 @@ int main(int argc, char* argv[]) {
 					int y;
 					if(ninji_is_subworld[data_id][ninji.first]) {
 						x = frame.x / 16 - 8 * 13;
-						y = level_subworld_image[data_id]->height() - (frame.y / 16 - 16 * 5)
+						y = level_subworld_image[data_id]->height() - (frame.y / 16 - 16 * 6)
 							+ level_overworld_image[data_id]->height();
 					} else {
 						x = frame.x / 16 - 8 * 13;
-						y = level_overworld_image[data_id]->height() - (frame.y / 16 - 16 * 5);
+						y = level_overworld_image[data_id]->height() - (frame.y / 16 - 16 * 6);
 					}
 
-					canvas->drawImage(player_sprites[frame.state]->asImage(), x, y);
+					auto sprite = player_sprites[frame.state]->asImage();
+					canvas->drawImage(sprite, x, y - sprite->height());
 					// canvas->drawSimpleText(
 					//	player.name.c_str(), player.name.size(), SkTextEncoding::kUTF8, x + 16, y - 4, font, paint);
 
