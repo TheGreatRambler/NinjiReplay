@@ -246,7 +246,9 @@ int main(int argc, char* argv[]) {
 		uint8_t state;
 		uint16_t x;
 		uint16_t y;
-		NinjiFrameInfo info = NinjiFrameInfo::NONE;
+		uint8_t flags;
+		// NinjiFrameInfo info = NinjiFrameInfo::NONE;
+		// uint8_t flags       = 0;
 	};
 
 	struct __attribute__((packed, aligned(8))) NinjiInfo {
@@ -269,30 +271,6 @@ int main(int argc, char* argv[]) {
 		int start_y;
 	};
 
-	static std::unordered_map<int, std::unordered_set<int>> pipes = {
-		{ 33883306, { 0 } },
-		{ 29234075, { 0, 2, 3 } },
-		{ 28460377, { 0, 1, 2 } },
-		{ 27439231, { 0, 1 } },
-		{ 26746705, { 0, 1 } },
-		{ 25984384, { 0, 1 } },
-		{ 25459053, { 0, 1 } },
-		{ 25045367, { 0, 1 } },
-		{ 24477739, { 0, 1, 2 } },
-		{ 23738173, {} },
-		{ 23303835, {} },
-		{ 22587491, { 0, 1 } },
-		{ 21858065, {} },
-		{ 20182790, {} },
-		{ 17110274, {} },
-		{ 15675466, {} },
-		{ 14827235, { 0, 1 } },
-		{ 14328331, {} },
-		{ 13428950, { 0, 2 } },
-		{ 12619193, { 0, 1 } },
-		{ 12171034, {} },
-	};
-
 	static std::unordered_map<int, std::string> gamestyle = {
 		{ 33883306, "smb1" },
 		{ 29234075, "nsmbu" },
@@ -304,11 +282,11 @@ int main(int argc, char* argv[]) {
 		{ 25045367, "smb1" },
 		{ 24477739, "smb3" },
 		{ 23738173, "nsmbu" },
-		{ 23303835, "smb3" },
+		{ 23303835, "smb3" }, // File format broken
 		{ 22587491, "sm3dw" },
 		{ 21858065, "nsmbu" },
-		{ 20182790, "smw" },
-		{ 17110274, "sm3dw" },
+		{ 20182790, "smw" },   // Contains balloon mario, which has a turn angle that needs extra work/sprites
+		{ 17110274, "sm3dw" }, // Not done, needs rocket
 		{ 15675466, "smb3" },
 		{ 14827235, "smw" },
 		{ 14328331, "sm3dw" },
@@ -578,7 +556,7 @@ int main(int argc, char* argv[]) {
 		{ "ZW", 257 },
 	};
 
-	std::unordered_set<int> levels_to_render = { 25459053 };
+	std::unordered_set<int> levels_to_render = { 12171034 };
 	std::unordered_map<int, std::unordered_map<int, std::vector<NinjiFrame>>> ninji_paths;
 	std::unordered_map<int, std::unordered_map<int, bool>> ninji_is_subworld;
 	int current_player_index = 0;
@@ -747,19 +725,23 @@ int main(int argc, char* argv[]) {
 					if(flags & 0b00000110) {
 						uint8_t unk1 = decompressed_replay[current_offset];
 						current_offset++;
-						ninji_paths[data_id][player].push_back(NinjiFrame { player_state, x, y, (NinjiFrameInfo)unk1 });
-						// if(!unique_states.contains(unk1)) {
+						// ninji_paths[data_id][player].push_back(
+						//	NinjiFrame { player_state, x, y, (NinjiFrameInfo)unk1, flags });
+						//  if(!unique_states.contains(unk1)) {
 						//	std::cout << "NEW " << (int)unk1 << std::endl;
 						//	unique_states.emplace(unk1);
-						// }
-						// if(x & 7 != 1) {
+						//  }
+						//  if(x & 7 != 1) {
 						//	uint16_t unk2 = *(uint16_t*)&decompressed_replay[current_offset];
 						//	current_offset += 2;
 						//	toLittleEndianShort(unk2);
-						//}
+						// }
 					} else {
-						ninji_paths[data_id][player].push_back(NinjiFrame { player_state, x, y });
+						// ninji_paths[data_id][player].push_back(
+						//	NinjiFrame { player_state, x, y, NinjiFrameInfo::NONE, flags });
 					}
+
+					ninji_paths[data_id][player].push_back(NinjiFrame { player_state, x, y, flags });
 				}
 
 				if(pid_to_player.size() == 1000) {
@@ -1271,14 +1253,7 @@ int main(int argc, char* argv[]) {
 					// canvas->drawSimpleText(
 					//	player.name.c_str(), player.name.size(), SkTextEncoding::kUTF8, x + 16, y - 4, font, paint);
 
-					if(pipes[data_id].contains((int)frame.info)) {
-						ninji_is_subworld[data_id][ninji.first] = !ninji_is_subworld[data_id][ninji.first];
-					}
-
-					if(!seen_states.contains((int)frame.info)) {
-						std::cout << "Seen new state: " << (int)frame.info << std::endl;
-						seen_states.emplace((int)frame.info);
-					}
+					ninji_is_subworld[data_id][ninji.first] = frame.flags & 0b00001000;
 
 					players_rendered++;
 
