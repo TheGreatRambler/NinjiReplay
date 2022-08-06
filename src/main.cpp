@@ -6,6 +6,7 @@
 #include <codec/SkCodec.h>
 #include <core/SkBitmap.h>
 #include <core/SkCanvas.h>
+#include <core/SkColor.h>
 #include <core/SkFont.h>
 #include <core/SkGraphics.h>
 #include <core/SkImage.h>
@@ -48,8 +49,8 @@ extern "C" {
 #include <OpenGLES/ES2/gl.h>
 #endif
 
-//#define RENDER_VIDEO 1
-#define RENDER_SCREEN 1
+#define RENDER_VIDEO 1
+//#define RENDER_SCREEN 1
 
 bool gzip_decompress(uint8_t* input, int input_size, std::vector<uint8_t>& output) {
 	output.clear();
@@ -129,7 +130,7 @@ void downloadMiis(std::vector<std::string>& miis_to_download, std::vector<int>& 
 	int msgs_left          = -1;
 	int still_alive        = 1;
 
-	constexpr int MAX_PARALLEL = 10;
+	constexpr int MAX_PARALLEL = 200;
 	const int NUM_URLS         = miis_to_download.size();
 
 	curl_global_init(CURL_GLOBAL_ALL);
@@ -143,11 +144,15 @@ void downloadMiis(std::vector<std::string>& miis_to_download, std::vector<int>& 
 		curl_easy_setopt(eh, CURLOPT_WRITEFUNCTION, write_cb);
 		curl_easy_setopt(eh, CURLOPT_WRITEDATA, &mii_images[transfers]);
 		curl_easy_setopt(eh, CURLOPT_URL, miis_to_download[transfers].c_str());
+		curl_easy_setopt(eh, CURLOPT_TIMEOUT, 60L);
 		// curl_easy_setopt(eh, CURLOPT_PRIVATE, miis_to_download_player[transfers]);
 		curl_multi_add_handle(cm, eh);
 	}
 
+	int readRequests = 0;
+
 	do {
+		// std::cout << "CURL download loop " << still_alive << " " << transfers << " " << readRequests << std::endl;
 		curl_multi_perform(cm, &still_alive);
 
 		while((msg = curl_multi_info_read(cm, &msgs_left))) {
@@ -156,9 +161,11 @@ void downloadMiis(std::vector<std::string>& miis_to_download, std::vector<int>& 
 				// long player;
 				// curl_easy_getinfo(msg->easy_handle, CURLINFO_PRIVATE, &player);
 				//  fprintf(stderr, "R: %d - %s <%s>\n", msg->data.result, curl_easy_strerror(msg->data.result), url);
-				// char* url;
-				// curl_easy_getinfo(msg->easy_handle, CURLINFO_EFFECTIVE_URL, &url);
-				// std::cout << "Handled " << url << std::endl;
+				char* url;
+				curl_easy_getinfo(msg->easy_handle, CURLINFO_EFFECTIVE_URL, &url);
+				readRequests++;
+				std::cout << "Handled " << url << std::endl;
+				std::cout << "Read " << readRequests << " requests of " << NUM_URLS << std::endl;
 				curl_multi_remove_handle(cm, e);
 				curl_easy_cleanup(e);
 			} else {
@@ -169,14 +176,17 @@ void downloadMiis(std::vector<std::string>& miis_to_download, std::vector<int>& 
 				curl_easy_setopt(eh, CURLOPT_WRITEFUNCTION, write_cb);
 				curl_easy_setopt(eh, CURLOPT_WRITEDATA, &mii_images[transfers]);
 				curl_easy_setopt(eh, CURLOPT_URL, miis_to_download[transfers].c_str());
+				curl_easy_setopt(eh, CURLOPT_TIMEOUT, 60L);
 				// curl_easy_setopt(eh, CURLOPT_PRIVATE, miis_to_download_player[transfers]);
 				curl_multi_add_handle(cm, eh);
 				transfers++;
 			}
 		}
-		if(still_alive)
+
+		if(still_alive) {
 			curl_multi_wait(cm, NULL, 0, 1000, NULL);
-	} while(still_alive || (transfers < NUM_URLS));
+		}
+	} while(readRequests < NUM_URLS);
 
 	curl_multi_cleanup(cm);
 	curl_global_cleanup();
@@ -186,10 +196,13 @@ void encode_frame(AVFormatContext* fmt_ctx, AVCodecContext* enc_ctx, AVFrame* fr
 	int ret;
 	/* send the frame to the encoder */
 	if(frame)
-		printf("Send frame %3" PRId64 "\n", frame->pts);
+		printf("Send frame %u (%u s)\n", frame->pts, frame->pts / 60);
 	ret = avcodec_send_frame(enc_ctx, frame);
 	if(ret < 0) {
 		fprintf(stderr, "Error sending a frame for encoding\n");
+		char error[MAX_PATH];
+		av_strerror(ret, error, MAX_PATH);
+		std::cout << error << std::endl;
 		exit(1);
 	}
 	while(ret >= 0) {
@@ -255,7 +268,7 @@ int main(int argc, char* argv[]) {
 		std::string name;
 		std::string code;
 		std::string country;
-		SkBitmap* mii_image;
+		sk_sp<SkImage> mii_image;
 	};
 
 	struct __attribute__((packed, aligned(8))) NinjiGlobalInfo {
@@ -266,16 +279,21 @@ int main(int argc, char* argv[]) {
 		uint8_t charactor;
 	};
 
+	struct __attribute__((packed, aligned(8))) NinjiTime {
+		int player;
+		int time;
+	};
+
 	struct LevelBounds {
 		int start_x;
 		int start_y;
 	};
 
 	static std::unordered_map<int, std::string> gamestyle = {
-		{ 33883306, "smb1" },
-		{ 29234075, "nsmbu" },
-		{ 28460377, "smw" },
-		{ 27439231, "smb3" }, // File format broken
+		{ 33883306, "smb1" },  // good
+		{ 29234075, "nsmbu" }, // good
+		{ 28460377, "smw" },   // good
+		{ 27439231, "smb3" },  // File format broken
 		{ 26746705, "smb1" },
 		{ 25984384, "smw" },
 		{ 25459053, "sm3dw" },
@@ -556,7 +574,7 @@ int main(int argc, char* argv[]) {
 		{ "ZW", 257 },
 	};
 
-	std::unordered_set<int> levels_to_render = { 12171034 };
+	std::unordered_set<int> levels_to_render = { 12619193 };
 	std::unordered_map<int, std::unordered_map<int, std::vector<NinjiFrame>>> ninji_paths;
 	std::unordered_map<int, std::unordered_map<int, bool>> ninji_is_subworld;
 	int current_player_index = 0;
@@ -564,6 +582,9 @@ int main(int argc, char* argv[]) {
 	std::unordered_map<int, NinjiInfo> player_info;
 	std::unordered_map<int, std::unordered_map<int, NinjiGlobalInfo>> player_local_info;
 	std::unordered_map<int, LevelBounds> level_bounds;
+	std::unordered_map<int, std::unordered_map<int, bool>> player_facing;
+	std::unordered_map<int, std::vector<NinjiTime>> level_times;
+	std::unordered_map<int, int> level_times_size;
 
 	int row = 0;
 	while(true) {
@@ -707,10 +728,10 @@ int main(int argc, char* argv[]) {
 
 				uint8_t charactor                  = decompressed_replay[0x14];
 				player_local_info[data_id][player] = NinjiGlobalInfo { charactor };
-				uint32_t frames_size               = *(uint32_t*)&decompressed_replay[0x10];
-				toLittleEndian(frames_size);
+				uint32_t frames                    = *(uint32_t*)&decompressed_replay[0x10];
+				toLittleEndian(frames);
 				// Ninji's are rendered every 4 frames, 2 is because the frames is always two less than it should be
-				frames_size = (frames_size + 2) / 4;
+				int frames_size = (frames + 2) / 4;
 
 				size_t current_offset = 0x3C;
 				for(int i = 0; i < frames_size; i++) {
@@ -744,11 +765,13 @@ int main(int argc, char* argv[]) {
 					ninji_paths[data_id][player].push_back(NinjiFrame { player_state, x, y, flags });
 				}
 
-				if(pid_to_player.size() == 1000) {
-					// Break early for testing
-					std::cout << "Ending early for testing" << std::endl;
-					break;
-				}
+				level_times[data_id].push_back(NinjiTime { player, time });
+
+				// if(ninji_paths[data_id].size() == 200) {
+				//	// Break early for testing
+				//	std::cout << "Ending early for testing" << std::endl;
+				//	break;
+				// }
 			}
 
 			row++;
@@ -761,6 +784,13 @@ int main(int argc, char* argv[]) {
 		} else if(step == SQLITE_BUSY) {
 			// Ignore
 		}
+	}
+
+	for(auto& ninji_times : level_times) {
+		std::cout << "Sorting times for " << ninji_times.first << std::endl;
+		std::sort(std::begin(ninji_times.second), std::end(ninji_times.second),
+			[](const auto& lhs, const auto& rhs) { return lhs.time > rhs.time; });
+		level_times_size[ninji_times.first] = ninji_times.second.size();
 	}
 
 	// Obtain player info
@@ -813,23 +843,36 @@ int main(int argc, char* argv[]) {
 	sqlite3_close(db);
 
 	// Download all images
-	// downloadMiis(miis_to_download, miis_to_download_player, mii_images);
+	downloadMiis(miis_to_download, miis_to_download_player, mii_images);
 	std::cout << "Downloaded " << mii_images.size() << " images" << std::endl;
 	row = 0;
 	for(auto& image : mii_images) {
-		SkBitmap* bitmap = new SkBitmap();
+		SkBitmap bitmap;
 		std::unique_ptr<SkCodec> jpeg
 			= SkCodec::MakeFromData(SkData::MakeWithCopy(image.second.data(), image.second.size()));
+
+		if(!jpeg) {
+			std::cout << "No Mii image seen at " << row << std::endl;
+			row++;
+			continue;
+		}
+
 		SkImageInfo info = jpeg->getInfo().makeColorType(kBGRA_8888_SkColorType);
-		bitmap->allocPixels(info);
-		jpeg->getPixels(info, bitmap->getPixels(), bitmap->rowBytes());
-		bitmap->setImmutable();
-		player_info[image.first].mii_image = bitmap;
+		bitmap.allocPixels(info);
+		jpeg->getPixels(info, bitmap.getPixels(), bitmap.rowBytes());
+		bitmap.setImmutable();
+
+		sk_sp<SkSurface> rasterSurface = SkSurface::MakeRasterN32Premul(24, 24);
+		rasterSurface->getCanvas()->drawImageRect(bitmap.asImage(), SkRect::MakeLTRB(75, 75, 512 - 75, 512 - 75),
+			SkRect::MakeWH(24, 24), SkSamplingOptions(SkFilterMode::kNearest), nullptr,
+			SkCanvas::kStrict_SrcRectConstraint);
+
+		player_info[image.first].mii_image = rasterSurface->makeImageSnapshot();
 
 		row++;
 
 		if(row % 10000 == 0) {
-			std::cout << "Handled bitmap row " << row << std::endl;
+			std::cout << "Handled mii row " << row << std::endl;
 		}
 	}
 	miis_to_download.clear();
@@ -837,7 +880,8 @@ int main(int argc, char* argv[]) {
 	mii_images.clear();
 
 	// Create images for players
-	std::unordered_map<int, std::unordered_map<int, std::unordered_map<int, SkBitmap*>>> player_image;
+	std::unordered_map<int, std::unordered_map<int, std::unordered_map<int, sk_sp<SkImage>>>> player_image;
+	std::unordered_map<int, std::unordered_map<int, std::unordered_map<int, sk_sp<SkImage>>>> player_mirrored_image;
 	for(auto data_id : levels_to_render) {
 		for(int player = 0; player < 4; player++) {
 			std::string player_name;
@@ -885,13 +929,20 @@ int main(int argc, char* argv[]) {
 				bitmap->allocPixels(info);
 				player_sprite->getPixels(info, bitmap->getPixels(), bitmap->rowBytes());
 				bitmap->setImmutable();
-				player_image[data_id][player][state] = bitmap;
+				player_image[data_id][player][state] = bitmap->asImage();
+
+				sk_sp<SkSurface> rasterSurface = SkSurface::MakeRasterN32Premul(bitmap->width(), bitmap->height());
+				SkCanvas* rasterCanvas         = rasterSurface->getCanvas();
+				rasterCanvas->translate(bitmap->width(), 0);
+				rasterCanvas->scale(-1, 1);
+				rasterCanvas->drawImage(bitmap->asImage(), 0, 0);
+				player_mirrored_image[data_id][player][state] = rasterSurface->makeImageSnapshot();
 			}
 		}
 	}
 
 	// Create images for flags
-	std::unordered_map<std::string, SkBitmap*> flag_image;
+	std::unordered_map<std::string, sk_sp<SkImage>> flag_image;
 	for(auto& flag : used_flags) {
 		SkBitmap* bitmap                    = new SkBitmap();
 		std::unique_ptr<SkCodec> flag_codec = SkCodec::MakeFromStream(
@@ -900,7 +951,12 @@ int main(int argc, char* argv[]) {
 		bitmap->allocPixels(info);
 		flag_codec->getPixels(info, bitmap->getPixels(), bitmap->rowBytes());
 		bitmap->setImmutable();
-		flag_image[flag] = bitmap;
+
+		sk_sp<SkSurface> rasterSurface = SkSurface::MakeRasterN32Premul(36, 24);
+		rasterSurface->getCanvas()->drawImageRect(bitmap->asImage(), SkRect::MakeWH(180, 120), SkRect::MakeWH(36, 24),
+			SkSamplingOptions(SkFilterMode::kNearest), nullptr, SkCanvas::kStrict_SrcRectConstraint);
+
+		flag_image[flag] = rasterSurface->makeImageSnapshot();
 	}
 
 	// Create images for levels
@@ -935,10 +991,12 @@ int main(int argc, char* argv[]) {
 	paint.setAntiAlias(false);
 	paint.setColor(SK_ColorWHITE);
 
+	int leaderboard_x_offset   = 3840;
+	int leaderboard_width      = 352;
+	int leaderboard_height     = 1080;
+	int countries_graph_height = 500;
+
 #ifdef RENDER_SCREEN
-
-	// canvas.drawBitmap(Bitmap, 0, 0, &paint);
-
 	// Start rendering to screen
 	uint32_t windowFlags = 0;
 
@@ -996,8 +1054,8 @@ int main(int argc, char* argv[]) {
 	//	dm.h += level_subworld_image[data_id]->height();
 	//}
 	// Choose max possible to encompass all
-	dm.w = 3840;
-	dm.h = 432 + 2688;
+	dm.w = leaderboard_x_offset + leaderboard_width;
+	dm.h = 432 + 2688 + countries_graph_height;
 
 	SDL_Window* window
 		= SDL_CreateWindow("SDL Window", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, dm.w, dm.h, windowFlags);
@@ -1093,14 +1151,6 @@ int main(int argc, char* argv[]) {
 #endif
 
 #ifdef RENDER_VIDEO
-	int width        = 3840;
-	int height       = 432 + 2688;
-	SkImageInfo info = SkImageInfo::Make(width, height, kRGB_888x_SkColorType, kPremul_SkAlphaType);
-	size_t rowBytes  = info.minRowBytes();
-	std::vector<uint8_t> pixelMemory(rowBytes * height);
-	sk_sp<SkSurface> surface = SkSurface::MakeRasterDirect(info, pixelMemory.data(), rowBytes);
-	SkCanvas* canvas         = surface->getCanvas();
-
 	uint8_t endcode[] = { 0, 0, 1, 0xb7 };
 
 	const AVCodec* codec = avcodec_find_encoder_by_name("libx264rgb");
@@ -1109,60 +1159,81 @@ int main(int argc, char* argv[]) {
 		exit(1);
 	}
 
-	AVCodecContext* codec_context = avcodec_alloc_context3(codec);
-	if(!codec_context) {
-		fprintf(stderr, "Could not allocate video codec context\n");
-		exit(1);
-	}
-
-	/* resolution must be a multiple of two */
-	codec_context->width  = width;
-	codec_context->height = height;
-	/* frames per second */
-	codec_context->time_base = (AVRational) { 1, 60 };
-	codec_context->framerate = (AVRational) { 60, 1 };
-	/* emit one intra frame every ten frames
-	 * check frame pict_type before passing frame
-	 * to encoder, if frame->pict_type is AV_PICTURE_TYPE_I
-	 * then gop_size is ignored and the output of encoder
-	 * will always be I frame irrespective to gop_size
-	 */
-	codec_context->gop_size     = 10;
-	codec_context->max_b_frames = 1;
-	codec_context->pix_fmt      = AV_PIX_FMT_RGB24;
-	av_opt_set(codec_context->priv_data, "crf", "17", 0);
-	av_opt_set(codec_context->priv_data, "preset", "slow", 0);
-
-	/* open it */
-	if(avcodec_open2(codec_context, codec, NULL) < 0) {
-		fprintf(stderr, "Could not open codec\n");
-		exit(1);
-	}
-
-	AVFrame* video_frame = av_frame_alloc();
-	if(!video_frame) {
-		fprintf(stderr, "Could not allocate video frame\n");
-		exit(1);
-	}
-	video_frame->format = codec_context->pix_fmt;
-	video_frame->width  = codec_context->width;
-	video_frame->height = codec_context->height;
-
-	/* the image can be allocated by any means and av_image_alloc() is
-	 * just the most convenient way if av_malloc() is to be used */
-	av_frame_get_buffer(video_frame, 32);
+	std::vector<uint8_t> pixelMemory;
 #endif
 
-	SkFont font(SkTypeface::MakeFromFile("../assets/fonts/NotoSansJP-Regular.otf"));
-	font.setSize(10);
+	SkFont nameFont(SkTypeface::MakeFromFile("../assets/fonts/NotoSansJP-Regular.otf"));
+	nameFont.setSize(15);
+	SkFont rankFont(SkTypeface::MakeFromFile("../assets/fonts/NotoSansJP-Regular.otf"));
+	rankFont.setSize(20);
+	SkFont countryCountFont(SkTypeface::MakeFromFile("../assets/fonts/NotoSansJP-Regular.otf"));
+	rankFont.setSize(10);
 
-	int frame = 0;
 	for(auto data_id : levels_to_render) {
+		int frame               = 0;
 		int player_update_frame = 0;
 		int player_update       = 0;
 		bool stop               = false;
+		// Graph goes under this
+		int levels_height = level_overworld_image[data_id]->height() + level_subworld_image[data_id]->height();
+
+		// Show percent of countries so far
+		std::unordered_map<std::string, int> countries_so_far;
 
 #ifdef RENDER_VIDEO
+		int width       = leaderboard_x_offset + leaderboard_width;
+		int temp_height = levels_height + countries_graph_height;
+		// To render leaderboard, must include extra
+		int height       = (temp_height < leaderboard_height) ? leaderboard_height : temp_height;
+		SkImageInfo info = SkImageInfo::Make(width, height, kRGBA_8888_SkColorType, kPremul_SkAlphaType);
+		size_t rowBytes  = info.minRowBytes();
+		pixelMemory.resize(rowBytes * height);
+		sk_sp<SkSurface> surface = SkSurface::MakeRasterDirect(info, pixelMemory.data(), rowBytes);
+		SkCanvas* canvas         = surface->getCanvas();
+
+		AVCodecContext* codec_context = avcodec_alloc_context3(codec);
+		if(!codec_context) {
+			fprintf(stderr, "Could not allocate video codec context\n");
+			exit(1);
+		}
+
+		/* resolution must be a multiple of two */
+		codec_context->width  = width;
+		codec_context->height = height;
+		/* frames per second */
+		codec_context->time_base = (AVRational) { 1, 60 };
+		codec_context->framerate = (AVRational) { 60, 1 };
+		/* emit one intra frame every ten frames
+		 * check frame pict_type before passing frame
+		 * to encoder, if frame->pict_type is AV_PICTURE_TYPE_I
+		 * then gop_size is ignored and the output of encoder
+		 * will always be I frame irrespective to gop_size
+		 */
+		codec_context->gop_size     = 10;
+		codec_context->max_b_frames = 1;
+		codec_context->pix_fmt      = AV_PIX_FMT_RGB24;
+		av_opt_set(codec_context->priv_data, "crf", "17", 0);
+		av_opt_set(codec_context->priv_data, "preset", "slow", 0);
+
+		/* open it */
+		if(avcodec_open2(codec_context, codec, NULL) < 0) {
+			fprintf(stderr, "Could not open codec\n");
+			exit(1);
+		}
+
+		AVFrame* video_frame = av_frame_alloc();
+		if(!video_frame) {
+			fprintf(stderr, "Could not allocate video frame\n");
+			exit(1);
+		}
+		video_frame->format = codec_context->pix_fmt;
+		video_frame->width  = codec_context->width;
+		video_frame->height = codec_context->height;
+
+		/* the image can be allocated by any means and av_image_alloc() is
+		 * just the most convenient way if av_malloc() is to be used */
+		av_frame_get_buffer(video_frame, 32);
+
 		AVPacket* pkt = av_packet_alloc();
 
 		std::string filename = std::to_string(data_id) + ".mp4";
@@ -1227,42 +1298,128 @@ int main(int argc, char* argv[]) {
 					level_subworld_image[data_id]->asImage(), 0, level_overworld_image[data_id]->height());
 			}
 
+			// Draw both "greenscreens" for chromakey
+			SkPaint greenscreenPaint;
+			greenscreenPaint.setColor(SkColorSetARGB(255, 190, 3, 253));
+			canvas->drawRect(
+				SkRect::MakeXYWH(leaderboard_x_offset, 0, leaderboard_width, leaderboard_height), greenscreenPaint);
+			canvas->drawRect(
+				SkRect::MakeXYWH(0, levels_height, leaderboard_x_offset + leaderboard_width, countries_graph_height),
+				greenscreenPaint);
+
+			// Draw leaderboard
+			for(int rank = 0; rank < 36; rank++) {
+				int index = level_times[data_id].size() - 1 - rank;
+				if(index <= 0)
+					break;
+
+				auto& time   = level_times[data_id][index];
+				auto& player = player_info[time.player];
+
+				int y                  = (rank + 1) * 36;
+				std::string rankString = std::to_string(level_times_size[data_id] - index);
+				canvas->drawSimpleText(rankString.c_str(), rankString.size(), SkTextEncoding::kUTF8,
+					leaderboard_x_offset, y, rankFont, paint);
+				if(player.mii_image) {
+					canvas->drawImage(player.mii_image, leaderboard_x_offset + 70, y - 20);
+				}
+				canvas->drawImage(flag_image[player.country], leaderboard_x_offset + 100, y - 20);
+				canvas->drawSimpleText(player.name.c_str(), player.name.size(), SkTextEncoding::kUTF8,
+					leaderboard_x_offset + 140, y, nameFont, paint);
+			}
+
+			// Draw countries graph
+			std::vector<std::pair<std::string, int>> sorted_country_counts;
+			for(auto& entry : countries_so_far) {
+				sorted_country_counts.push_back(std::make_pair(entry.first, entry.second));
+			}
+
+			std::sort(std::begin(sorted_country_counts), std::end(sorted_country_counts),
+				[](const auto& lhs, const auto& rhs) { return lhs.second > rhs.second; });
+
+			int biggest_size = 0;
+			int total_height = countries_graph_height - 45;
+			for(int i = 0; i < sorted_country_counts.size(); i++) {
+				auto& entry = sorted_country_counts[i];
+				if(i == 0) {
+					biggest_size = entry.second;
+				}
+
+				int startX = i * 54;
+				canvas->drawImage(flag_image[entry.first], startX + 9, levels_height + countries_graph_height - 24);
+				std::string numString = std::to_string(entry.second);
+				canvas->drawSimpleText(numString.c_str(), numString.size(), SkTextEncoding::kUTF8, startX + 7,
+					levels_height + countries_graph_height - 30, countryCountFont, paint);
+
+				// Draw graph bar
+				int bar_height = total_height * ((float)entry.second / biggest_size);
+				SkPaint barPaint;
+				barPaint.setColor(SK_ColorWHITE);
+				canvas->drawRect(SkRect::MakeXYWH((float)startX + 9.0f,
+									 (float)(levels_height + total_height - bar_height), 36.0f, (float)bar_height),
+					barPaint);
+			}
+
 			// Draw all players
 			// canvas->scale()
 			int players_rendered = 0;
 			for(auto& ninji : ninji_paths[data_id]) {
 				if(ninji.second.size() > player_update) {
-					auto& player         = player_info[ninji.first];
-					auto& player_local   = player_local_info[data_id][ninji.first];
-					auto& player_sprites = player_image[data_id][player_local.charactor];
+					auto& player                  = player_info[ninji.first];
+					auto& player_local            = player_local_info[data_id][ninji.first];
+					auto& player_sprites          = player_image[data_id][player_local.charactor];
+					auto& player_mirrored_sprites = player_mirrored_image[data_id][player_local.charactor];
 
 					auto& frame = ninji.second[player_update];
-					int x;
-					int y;
-					if(ninji_is_subworld[data_id][ninji.first]) {
-						x = frame.x / 16 - 8 * 13;
-						y = level_subworld_image[data_id]->height() - (frame.y / 16 - 16 * 6)
-							+ level_overworld_image[data_id]->height();
-					} else {
-						x = frame.x / 16 - 8 * 13;
-						y = level_overworld_image[data_id]->height() - (frame.y / 16 - 16 * 6);
+					// Check that not in pipe transition, very glitchy
+					if(!(frame.flags & 0b00000100)) {
+						int x;
+						int y;
+						if(ninji_is_subworld[data_id][ninji.first]) {
+							x = frame.x / 16 - 8 * 13;
+							y = level_subworld_image[data_id]->height() - (frame.y / 16 - 16 * 6)
+								+ level_overworld_image[data_id]->height();
+						} else {
+							x = frame.x / 16 - 8 * 13;
+							y = level_overworld_image[data_id]->height() - (frame.y / 16 - 16 * 6);
+						}
+
+						if(player_update != 0 && ninji.second[player_update - 1].x != ninji.second[player_update].x) {
+							player_facing[data_id][ninji.first]
+								= ninji.second[player_update].x < ninji.second[player_update - 1].x;
+						}
+
+						if(player_facing[data_id][ninji.first]) {
+							auto sprite = player_mirrored_sprites[frame.state];
+							canvas->drawImage(sprite, x, y - sprite->height());
+						} else {
+							auto sprite = player_sprites[frame.state];
+							canvas->drawImage(sprite, x, y - sprite->height());
+						}
+						// canvas->drawSimpleText(
+						//	player.name.c_str(), player.name.size(), SkTextEncoding::kUTF8, x + 16, y - 4, font, paint);
+
+						ninji_is_subworld[data_id][ninji.first] = frame.flags & 0b00001000;
 					}
-
-					auto sprite = player_sprites[frame.state]->asImage();
-					canvas->drawImage(sprite, x, y - sprite->height());
-					// canvas->drawSimpleText(
-					//	player.name.c_str(), player.name.size(), SkTextEncoding::kUTF8, x + 16, y - 4, font, paint);
-
-					ninji_is_subworld[data_id][ninji.first] = frame.flags & 0b00001000;
 
 					players_rendered++;
 
 					// std::cout << "Draw player " << player.name << " at " << (frame.x / 16) << " " << (frame.y / 16)
 					// << std::endl;
+				} else if(ninji.second.size() == player_update) {
+					// Remove from rankings
+					auto& last    = level_times[data_id][level_times[data_id].size() - 1];
+					auto& country = player_info[last.player].country;
+					if(!countries_so_far.contains(country)) {
+						countries_so_far[country] = 1;
+					} else {
+						countries_so_far[country]++;
+					}
+					level_times[data_id].pop_back();
 				}
 			}
 
-			if(player_update_frame == 5) {
+			if(player_update_frame == 1) {
 				player_update_frame = 0;
 				player_update++;
 			}
@@ -1289,6 +1446,11 @@ int main(int argc, char* argv[]) {
 			video_frame->pts = frame;
 
 			encode_frame(oc, codec_context, video_frame, pkt, stream);
+
+			// if(frame == 100) {
+			//	std::cout << "Finished early for render " << data_id << std::endl;
+			//	stop = true;
+			// }
 #endif
 
 #ifdef RENDER_SCREEN
@@ -1302,16 +1464,15 @@ int main(int argc, char* argv[]) {
 		av_write_trailer(oc);
 		avio_closep(&oc->pb);
 		av_packet_free(&pkt);
+		av_freep(&video_frame->data[0]);
 		avformat_free_context(oc);
+		avcodec_close(codec_context);
 #endif
 	}
 
 	std::cout << "Finished all levels" << std::endl;
 
 #ifdef RENDER_VIDEO
-	avcodec_free_context(&codec_context);
-	av_freep(&video_frame->data[0]);
-	av_frame_free(&video_frame);
 #endif
 
 #ifdef RENDER_SCREEN
