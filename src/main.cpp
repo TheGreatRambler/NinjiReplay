@@ -52,6 +52,8 @@ extern "C" {
 #define RENDER_VIDEO 1
 //#define RENDER_SCREEN 1
 
+//#define DRAW_NAMES 1
+
 bool gzip_decompress(uint8_t* input, int input_size, std::vector<uint8_t>& output) {
 	output.clear();
 
@@ -130,7 +132,7 @@ void downloadMiis(std::vector<std::string>& miis_to_download, std::vector<int>& 
 	int msgs_left          = -1;
 	int still_alive        = 1;
 
-	constexpr int MAX_PARALLEL = 200;
+	constexpr int MAX_PARALLEL = 50;
 	const int NUM_URLS         = miis_to_download.size();
 
 	curl_global_init(CURL_GLOBAL_ALL);
@@ -144,7 +146,7 @@ void downloadMiis(std::vector<std::string>& miis_to_download, std::vector<int>& 
 		curl_easy_setopt(eh, CURLOPT_WRITEFUNCTION, write_cb);
 		curl_easy_setopt(eh, CURLOPT_WRITEDATA, &mii_images[transfers]);
 		curl_easy_setopt(eh, CURLOPT_URL, miis_to_download[transfers].c_str());
-		curl_easy_setopt(eh, CURLOPT_TIMEOUT, 60L);
+		curl_easy_setopt(eh, CURLOPT_TIMEOUT, (5 * 60));
 		// curl_easy_setopt(eh, CURLOPT_PRIVATE, miis_to_download_player[transfers]);
 		curl_multi_add_handle(cm, eh);
 	}
@@ -574,7 +576,7 @@ int main(int argc, char* argv[]) {
 		{ "ZW", 257 },
 	};
 
-	std::unordered_set<int> levels_to_render = { 12619193 };
+	std::unordered_set<int> levels_to_render = { 27439231, 13428950, 14328331, 14827235 };
 	std::unordered_map<int, std::unordered_map<int, std::vector<NinjiFrame>>> ninji_paths;
 	std::unordered_map<int, std::unordered_map<int, bool>> ninji_is_subworld;
 	int current_player_index = 0;
@@ -767,7 +769,7 @@ int main(int argc, char* argv[]) {
 
 				level_times[data_id].push_back(NinjiTime { player, time });
 
-				// if(ninji_paths[data_id].size() == 200) {
+				// if(ninji_paths[data_id].size() == 2000) {
 				//	// Break early for testing
 				//	std::cout << "Ending early for testing" << std::endl;
 				//	break;
@@ -875,9 +877,14 @@ int main(int argc, char* argv[]) {
 			std::cout << "Handled mii row " << row << std::endl;
 		}
 	}
+
+	std::cout << "Handled all Miis" << std::endl;
+
 	miis_to_download.clear();
 	miis_to_download_player.clear();
 	mii_images.clear();
+
+	std::cout << "Cleared Mii vectors" << std::endl;
 
 	// Create images for players
 	std::unordered_map<int, std::unordered_map<int, std::unordered_map<int, sk_sp<SkImage>>>> player_image;
@@ -941,6 +948,8 @@ int main(int argc, char* argv[]) {
 		}
 	}
 
+	std::cout << "Created player images" << std::endl;
+
 	// Create images for flags
 	std::unordered_map<std::string, sk_sp<SkImage>> flag_image;
 	for(auto& flag : used_flags) {
@@ -958,6 +967,8 @@ int main(int argc, char* argv[]) {
 
 		flag_image[flag] = rasterSurface->makeImageSnapshot();
 	}
+
+	std::cout << "Created flag images" << std::endl;
 
 	// Create images for levels
 	std::unordered_map<int, SkBitmap*> level_overworld_image;
@@ -985,6 +996,8 @@ int main(int argc, char* argv[]) {
 			level_subworld_image[level] = subworld_bitmap;
 		}
 	}
+
+	std::cout << "Created level images" << std::endl;
 
 	// Paint for rendering, preserves pixel art
 	SkPaint paint;
@@ -1168,14 +1181,29 @@ int main(int argc, char* argv[]) {
 	rankFont.setSize(20);
 	SkFont countryCountFont(SkTypeface::MakeFromFile("../assets/fonts/NotoSansJP-Regular.otf"));
 	rankFont.setSize(10);
+	SkFont hoverNameFont(SkTypeface::MakeFromFile("../assets/fonts/NotoSansJP-Regular.otf"));
+	hoverNameFont.setSize(10);
+
+	SkPaint hoverNamePaint;
+	hoverNamePaint.setColor(SK_ColorWHITE);
+	hoverNamePaint.setAlpha(150);
+
+	std::cout << "Prepare to render" << std::endl;
 
 	for(auto data_id : levels_to_render) {
+		std::cout << "Start render for " << data_id << std::endl;
+
 		int frame               = 0;
 		int player_update_frame = 0;
 		int player_update       = 0;
 		bool stop               = false;
 		// Graph goes under this
-		int levels_height = level_overworld_image[data_id]->height() + level_subworld_image[data_id]->height();
+		int levels_height = 0;
+		if(level_subworld_image.contains(data_id)) {
+			levels_height = level_overworld_image[data_id]->height() + level_subworld_image[data_id]->height();
+		} else {
+			levels_height = level_overworld_image[data_id]->height();
+		}
 
 		// Show percent of countries so far
 		std::unordered_map<std::string, int> countries_so_far;
@@ -1191,11 +1219,15 @@ int main(int argc, char* argv[]) {
 		sk_sp<SkSurface> surface = SkSurface::MakeRasterDirect(info, pixelMemory.data(), rowBytes);
 		SkCanvas* canvas         = surface->getCanvas();
 
+		std::cout << "Created surface for " << data_id << std::endl;
+
 		AVCodecContext* codec_context = avcodec_alloc_context3(codec);
 		if(!codec_context) {
 			fprintf(stderr, "Could not allocate video codec context\n");
 			exit(1);
 		}
+
+		std::cout << "Created codec context for " << data_id << std::endl;
 
 		/* resolution must be a multiple of two */
 		codec_context->width  = width;
@@ -1230,24 +1262,40 @@ int main(int argc, char* argv[]) {
 		video_frame->width  = codec_context->width;
 		video_frame->height = codec_context->height;
 
+		std::cout << "Created video frame for " << data_id << std::endl;
+
 		/* the image can be allocated by any means and av_image_alloc() is
 		 * just the most convenient way if av_malloc() is to be used */
 		av_frame_get_buffer(video_frame, 32);
 
+		std::cout << "Created av frame for " << data_id << std::endl;
+
 		AVPacket* pkt = av_packet_alloc();
 
+		std::cout << "Created packet for " << data_id << std::endl;
+
+#ifdef DRAW_NAMES
+		std::string filename = std::to_string(data_id) + "_names.mp4";
+#else
 		std::string filename = std::to_string(data_id) + ".mp4";
+#endif
 
 		AVFormatContext* oc;
 		avformat_alloc_output_context2(&oc, NULL, NULL, filename.c_str());
 		const AVOutputFormat* fmt = oc->oformat;
 
+		std::cout << "Created output context for " << data_id << std::endl;
+
 		AVStream* stream = avformat_new_stream(oc, NULL);
 		avcodec_parameters_from_context(stream->codecpar, codec_context);
 		stream->time_base = (AVRational) { 1, 60 };
 
+		std::cout << "Created stream for " << data_id << std::endl;
+
 		avio_open(&oc->pb, filename.c_str(), AVIO_FLAG_WRITE);
 		avformat_write_header(oc, NULL);
+
+		std::cout << "Opened output video file " << data_id << std::endl;
 #endif
 
 		std::unordered_set<int> seen_states;
@@ -1373,6 +1421,8 @@ int main(int argc, char* argv[]) {
 					auto& frame = ninji.second[player_update];
 					// Check that not in pipe transition, very glitchy
 					if(!(frame.flags & 0b00000100)) {
+						ninji_is_subworld[data_id][ninji.first] = frame.flags & 0b00001000;
+
 						int x;
 						int y;
 						if(ninji_is_subworld[data_id][ninji.first]) {
@@ -1396,10 +1446,11 @@ int main(int argc, char* argv[]) {
 							auto sprite = player_sprites[frame.state];
 							canvas->drawImage(sprite, x, y - sprite->height());
 						}
-						// canvas->drawSimpleText(
-						//	player.name.c_str(), player.name.size(), SkTextEncoding::kUTF8, x + 16, y - 4, font, paint);
 
-						ninji_is_subworld[data_id][ninji.first] = frame.flags & 0b00001000;
+#ifdef DRAW_NAMES
+						canvas->drawSimpleText(player.name.c_str(), player.name.size(), SkTextEncoding::kUTF8, x + 16,
+							y - 4, hoverNameFont, hoverNamePaint);
+#endif
 					}
 
 					players_rendered++;
@@ -1427,6 +1478,10 @@ int main(int argc, char* argv[]) {
 			canvas->flush();
 			frame++;
 			player_update_frame++;
+
+			if(frame % 1000 == 0) {
+				std::cout << "Rendered frame " << frame << std::endl;
+			}
 
 			if(players_rendered == 0) {
 				std::cout << "Finished " << data_id << std::endl;
