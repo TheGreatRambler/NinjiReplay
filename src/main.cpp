@@ -10,6 +10,7 @@
 #include <core/SkFont.h>
 #include <core/SkGraphics.h>
 #include <core/SkImage.h>
+#include <core/SkStream.h>
 #include <core/SkSurface.h>
 #include <core/SkTextBlob.h>
 #include <core/SkTypeface.h>
