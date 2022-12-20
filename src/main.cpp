@@ -1575,41 +1575,45 @@ int main(int argc, char* argv[]) {
 #endif
 
 #ifdef RENDER_LINES
-				SkPaint linePaint;
+				if((player_update + 1) < frames.size()) {
+					SkPaint linePaint;
 
-				// TODO consider something other than linear interpolation
-				double percentage = (double)(ninji_times[data_id][player_num] - best_ninji_time[data_id])
-									/ (double)(worst_ninji_time[data_id] - best_ninji_time[data_id]);
-				constexpr double curve_constant = 0.005;
-				double exponential_percentage   = std::pow(1.0 - percentage, 1 / curve_constant - 1);
-				SkScalar lineHSV[3];
-				lineHSV[0] = 0.0 + exponential_percentage * 120.0;
-				lineHSV[1] = 1.0;
-				lineHSV[2] = 0.75;
-				linePaint.setColor(SkHSVToColor(lineHSV));
+					// TODO consider something other than linear interpolation
+					double percentage = (double)(ninji_times[data_id][player_num] - best_ninji_time[data_id])
+										/ (double)(worst_ninji_time[data_id] - best_ninji_time[data_id]);
+					constexpr double curve_constant = 0.005;
+					double exponential_percentage   = std::pow(1.0 - percentage, 1 / curve_constant - 1);
+					SkScalar lineHSV[3];
+					lineHSV[0] = 0.0 + exponential_percentage * 120.0;
+					lineHSV[1] = 1.0;
+					lineHSV[2] = 0.75;
+					linePaint.setColor(SkHSVToColor(lineHSV));
 
-				linePaint.setAlpha(200);
-				linePaint.setStrokeWidth(1);
-				linePaint.setAntiAlias(false);
+					linePaint.setAlpha(200);
+					linePaint.setStrokeWidth(1);
+					linePaint.setAntiAlias(false);
 
-				if(player_update == frames.size() && player_update_subframe == 0) {
-					// Remove from rankings
-					auto size     = level_times[data_id].size();
-					auto& last    = level_times[data_id][size - 1];
-					auto& country = player_info[last.player].country;
-					if(!countries_so_far.contains(country)) {
-						countries_so_far[country] = 1;
+					if(player_update == frames.size() && player_update_subframe == 0) {
+						// Remove from rankings
+						auto size     = level_times[data_id].size();
+						auto& last    = level_times[data_id][size - 1];
+						auto& country = player_info[last.player].country;
+						if(!countries_so_far.contains(country)) {
+							countries_so_far[country] = 1;
+						} else {
+							countries_so_far[country]++;
+						}
+						level_times[data_id].pop_back();
 					} else {
-						countries_so_far[country]++;
+						players_rendered++;
 					}
-					level_times[data_id].pop_back();
-				} else {
-					players_rendered++;
-				}
 
-				if(player_update != 0 || player_update_subframe != 0) {
 					int max_update;
-					if(player_update == 0) {
+					if(player_update == 0 && player_update_subframe == 0) {
+						// Intentially render one frame with every path, since we're now removing them when they reach
+						// the flagpole
+						max_update = frames.size() - 1;
+					} else if(player_update == 0) {
 						max_update = 0;
 					} else if((player_update + 1) < frames.size()) {
 						max_update = player_update;
@@ -1687,6 +1691,34 @@ int main(int argc, char* argv[]) {
 
 			canvas->flush();
 
+#ifdef RENDER_VIDEO
+			bool render_this_frame = true;
+#endif
+#ifdef RENDER_LINES
+			// Render one image with every path
+			if(player_update == 0 && player_update_subframe == 0) {
+				SkFILEWStream dest((std::to_string(data_id) + "_lines.png").c_str());
+				SkPngEncoder::Options options;
+				options.fZLibLevel = 9;
+
+				SkBitmap bitmap;
+				bitmap.allocPixels(SkImageInfo::Make(surface->width(), surface->height(),
+									   SkColorType::kRGB_888x_SkColorType, SkAlphaType::kOpaque_SkAlphaType),
+					0);
+
+				canvas->readPixels(bitmap, 0, 0);
+				SkPixmap src;
+				bitmap.peekPixels(&src);
+				if(!SkPngEncoder::Encode(&dest, src, options)) {
+					std::cout << "Could not render full line image" << std::endl;
+				}
+
+#ifdef RENDER_VIDEO
+				render_this_frame = false;
+#endif
+			}
+#endif
+
 			if(player_update_subframe == 3) {
 				player_update_subframe = 0;
 				player_update++;
@@ -1712,23 +1744,25 @@ int main(int argc, char* argv[]) {
 			}
 
 #ifdef RENDER_VIDEO
-			// if(!surface->readPixels(info, &video_frame->data[0], rowBytes, 0, 0)) {
-			//	std::cout << "Could not write frame to video" << std::endl;
-			// }
-			for(int y = 0; y < height; y++) {
-				for(int x = 0; x < width; x++) {
-					memcpy(&video_frame->data[0][(y * width + x) * 3], &pixelMemory[(y * width + x) * 4], 3);
+			if(render_this_frame) {
+				// if(!surface->readPixels(info, &video_frame->data[0], rowBytes, 0, 0)) {
+				//	std::cout << "Could not write frame to video" << std::endl;
+				// }
+				for(int y = 0; y < height; y++) {
+					for(int x = 0; x < width; x++) {
+						memcpy(&video_frame->data[0][(y * width + x) * 3], &pixelMemory[(y * width + x) * 4], 3);
+					}
 				}
+				// memcpy(&video_frame->data[0], pixelMemory.data(), pixelMemory.size());
+				video_frame->pts = frame;
+
+				encode_frame(oc, codec_context, video_frame, pkt, stream);
+
+				// if(frame == 100) {
+				//	std::cout << "Finished early for render " << data_id << std::endl;
+				//	stop = true;
+				// }
 			}
-			// memcpy(&video_frame->data[0], pixelMemory.data(), pixelMemory.size());
-			video_frame->pts = frame;
-
-			encode_frame(oc, codec_context, video_frame, pkt, stream);
-
-			// if(frame == 100) {
-			//	std::cout << "Finished early for render " << data_id << std::endl;
-			//	stop = true;
-			// }
 #endif
 
 #ifdef RENDER_SCREEN
