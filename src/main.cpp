@@ -16,6 +16,7 @@
 #include <curl/curl.h>
 #include <encode/SkPngEncoder.h>
 #include <filesystem>
+#include <fstream>
 #include <gpu/GrBackendSurface.h>
 #include <gpu/GrDirectContext.h>
 #include <gpu/gl/GrGLInterface.h>
@@ -53,6 +54,11 @@ extern "C" {
 //#define RENDER_SCREEN 1
 
 //#define DRAW_NAMES 1
+
+//#define RENDER_PLAYER 1
+#define RENDER_LINES 1
+
+//#define STOP_EARLY 1
 
 bool gzip_decompress(uint8_t* input, int input_size, std::vector<uint8_t>& output) {
 	output.clear();
@@ -125,73 +131,105 @@ static size_t write_cb(char* data, size_t n, size_t l, void* userp) {
 }
 
 void downloadMiis(std::vector<std::string>& miis_to_download, std::vector<int>& miis_to_download_player,
-	std::unordered_map<int, std::string>& mii_images) {
-	CURLM* cm;
-	CURLMsg* msg;
-	unsigned int transfers = 0;
-	int msgs_left          = -1;
-	int still_alive        = 1;
-
-	constexpr int MAX_PARALLEL = 50;
-	const int NUM_URLS         = miis_to_download.size();
-
-	curl_global_init(CURL_GLOBAL_ALL);
-	cm = curl_multi_init();
-
-	/* Limit the amount of simultaneous connections curl should allow: */
-	curl_multi_setopt(cm, CURLMOPT_MAXCONNECTS, (long)MAX_PARALLEL);
-
-	for(transfers = 0; transfers < MAX_PARALLEL; transfers++) {
-		CURL* eh = curl_easy_init();
-		curl_easy_setopt(eh, CURLOPT_WRITEFUNCTION, write_cb);
-		curl_easy_setopt(eh, CURLOPT_WRITEDATA, &mii_images[transfers]);
-		curl_easy_setopt(eh, CURLOPT_URL, miis_to_download[transfers].c_str());
-		curl_easy_setopt(eh, CURLOPT_TIMEOUT, (5 * 60));
-		// curl_easy_setopt(eh, CURLOPT_PRIVATE, miis_to_download_player[transfers]);
-		curl_multi_add_handle(cm, eh);
+	std::unordered_map<int, std::string>& mii_images, std::unordered_map<int, std::string>& player_to_pid) {
+	// First handle cached
+	auto it  = miis_to_download_player.begin();
+	auto it2 = miis_to_download.begin();
+	while(it != miis_to_download_player.end()) {
+		if(std::filesystem::exists(std::string("../mii_cache/") + player_to_pid[*it] + ".png")) {
+			std::ifstream mii_image(
+				std::string("../mii_cache/") + player_to_pid[*it] + ".png", std::ios::in | std::ios::binary);
+			std::string data((std::istreambuf_iterator<char>(mii_image)), std::istreambuf_iterator<char>());
+			mii_image.close();
+			mii_images[*it] = data;
+			it              = miis_to_download_player.erase(it);
+			it2             = miis_to_download.erase(it2);
+		} else {
+			++it;
+			++it2;
+		}
 	}
 
-	int readRequests = 0;
+	if(miis_to_download.size() > 0) {
+		CURLM* cm;
+		CURLMsg* msg;
+		unsigned int transfers = 0;
+		int msgs_left          = -1;
+		int still_alive        = 1;
 
-	do {
-		// std::cout << "CURL download loop " << still_alive << " " << transfers << " " << readRequests << std::endl;
-		curl_multi_perform(cm, &still_alive);
+		constexpr int MAX_PARALLEL = 50;
+		const int NUM_URLS         = miis_to_download.size();
 
-		while((msg = curl_multi_info_read(cm, &msgs_left))) {
-			if(msg->msg == CURLMSG_DONE) {
-				CURL* e = msg->easy_handle;
-				// long player;
-				// curl_easy_getinfo(msg->easy_handle, CURLINFO_PRIVATE, &player);
-				//  fprintf(stderr, "R: %d - %s <%s>\n", msg->data.result, curl_easy_strerror(msg->data.result), url);
-				char* url;
-				curl_easy_getinfo(msg->easy_handle, CURLINFO_EFFECTIVE_URL, &url);
-				readRequests++;
-				std::cout << "Handled " << url << std::endl;
-				std::cout << "Read " << readRequests << " requests of " << NUM_URLS << std::endl;
-				curl_multi_remove_handle(cm, e);
-				curl_easy_cleanup(e);
-			} else {
-				fprintf(stderr, "E: CURLMsg (%d)\n", msg->msg);
+		curl_global_init(CURL_GLOBAL_ALL);
+		cm = curl_multi_init();
+
+		/* Limit the amount of simultaneous connections curl should allow: */
+		curl_multi_setopt(cm, CURLMOPT_MAXCONNECTS, (long)MAX_PARALLEL);
+
+		for(transfers = 0; transfers < MAX_PARALLEL; transfers++) {
+			CURL* eh = curl_easy_init();
+			curl_easy_setopt(eh, CURLOPT_WRITEFUNCTION, write_cb);
+			curl_easy_setopt(eh, CURLOPT_WRITEDATA, &mii_images[transfers]);
+			curl_easy_setopt(eh, CURLOPT_URL, miis_to_download[transfers].c_str());
+			curl_easy_setopt(eh, CURLOPT_TIMEOUT, (5 * 60));
+			// curl_easy_setopt(eh, CURLOPT_PRIVATE, miis_to_download_player[transfers]);
+			curl_multi_add_handle(cm, eh);
+		}
+
+		int readRequests = 0;
+
+		do {
+			// std::cout << "CURL download loop " << still_alive << " " << transfers << " " << readRequests <<
+			// std::endl;
+			curl_multi_perform(cm, &still_alive);
+
+			while((msg = curl_multi_info_read(cm, &msgs_left))) {
+				if(msg->msg == CURLMSG_DONE) {
+					CURL* e = msg->easy_handle;
+					// long player;
+					// curl_easy_getinfo(msg->easy_handle, CURLINFO_PRIVATE, &player);
+					//  fprintf(stderr, "R: %d - %s <%s>\n", msg->data.result, curl_easy_strerror(msg->data.result),
+					//  url);
+					char* url;
+					curl_easy_getinfo(msg->easy_handle, CURLINFO_EFFECTIVE_URL, &url);
+					readRequests++;
+					std::cout << "Handled " << url << std::endl;
+					std::cout << "Read " << readRequests << " requests of " << NUM_URLS << std::endl;
+					curl_multi_remove_handle(cm, e);
+					curl_easy_cleanup(e);
+				} else {
+					fprintf(stderr, "E: CURLMsg (%d)\n", msg->msg);
+				}
+				if(transfers < NUM_URLS) {
+					CURL* eh = curl_easy_init();
+					curl_easy_setopt(eh, CURLOPT_WRITEFUNCTION, write_cb);
+					curl_easy_setopt(eh, CURLOPT_WRITEDATA, &mii_images[transfers]);
+					curl_easy_setopt(eh, CURLOPT_URL, miis_to_download[transfers].c_str());
+					curl_easy_setopt(eh, CURLOPT_TIMEOUT, 60L);
+					// curl_easy_setopt(eh, CURLOPT_PRIVATE, miis_to_download_player[transfers]);
+					curl_multi_add_handle(cm, eh);
+					transfers++;
+				}
 			}
-			if(transfers < NUM_URLS) {
-				CURL* eh = curl_easy_init();
-				curl_easy_setopt(eh, CURLOPT_WRITEFUNCTION, write_cb);
-				curl_easy_setopt(eh, CURLOPT_WRITEDATA, &mii_images[transfers]);
-				curl_easy_setopt(eh, CURLOPT_URL, miis_to_download[transfers].c_str());
-				curl_easy_setopt(eh, CURLOPT_TIMEOUT, 60L);
-				// curl_easy_setopt(eh, CURLOPT_PRIVATE, miis_to_download_player[transfers]);
-				curl_multi_add_handle(cm, eh);
-				transfers++;
+
+			if(still_alive) {
+				curl_multi_wait(cm, NULL, 0, 1000, NULL);
+			}
+		} while(readRequests < NUM_URLS);
+
+		for(auto& image : mii_images) {
+			if(!std::filesystem::exists(std::string("../mii_cache/") + player_to_pid[image.first] + ".png")) {
+				std::filesystem::create_directory("../mii_cache");
+				auto cached_mii_image = std::fstream(std::string("../mii_cache/") + player_to_pid[image.first] + ".png",
+					std::ios::out | std::ios::binary);
+				cached_mii_image.write(image.second.c_str(), image.second.size());
+				cached_mii_image.close();
 			}
 		}
 
-		if(still_alive) {
-			curl_multi_wait(cm, NULL, 0, 1000, NULL);
-		}
-	} while(readRequests < NUM_URLS);
-
-	curl_multi_cleanup(cm);
-	curl_global_cleanup();
+		curl_multi_cleanup(cm);
+		curl_global_cleanup();
+	}
 }
 
 void encode_frame(AVFormatContext* fmt_ctx, AVCodecContext* enc_ctx, AVFrame* frame, AVPacket* pkt, AVStream* stream) {
@@ -236,13 +274,16 @@ int main(int argc, char* argv[]) {
 	char* err_msg = 0;
 	sqlite3_stmt* res;
 
-	int rc = sqlite3_open("E:/MariOver/dump/dump.db", &db);
+	int rc = sqlite3_open("../ninji_replay.db", &db);
 
 	if(rc != SQLITE_OK) {
 		fprintf(stderr, "Cannot open database: %s\n", sqlite3_errmsg(db));
 		sqlite3_close(db);
 		return 1;
 	}
+
+	// Increase cache size for performance
+	sqlite3_exec(db, "PRAGMA cache_size=-20000", 0, 0, 0);
 
 	char* replay_query = "SELECT data_id,pid,time,replay FROM ninji";
 	rc                 = sqlite3_prepare_v2(db, replay_query, -1, &res, 0);
@@ -576,11 +617,15 @@ int main(int argc, char* argv[]) {
 		{ "ZW", 257 },
 	};
 
-	std::unordered_set<int> levels_to_render = { 27439231, 13428950, 14328331, 14827235 };
+	std::unordered_set<int> levels_to_render = { 12171034 };
 	std::unordered_map<int, std::unordered_map<int, std::vector<NinjiFrame>>> ninji_paths;
+	std::unordered_map<int, std::unordered_map<int, int>> ninji_times;
+	std::unordered_map<int, int> best_ninji_time;
+	std::unordered_map<int, int> worst_ninji_time;
 	std::unordered_map<int, std::unordered_map<int, bool>> ninji_is_subworld;
 	int current_player_index = 0;
 	std::unordered_map<std::string, int> pid_to_player;
+	std::unordered_map<int, std::string> player_to_pid;
 	std::unordered_map<int, NinjiInfo> player_info;
 	std::unordered_map<int, std::unordered_map<int, NinjiGlobalInfo>> player_local_info;
 	std::unordered_map<int, LevelBounds> level_bounds;
@@ -600,8 +645,9 @@ int main(int argc, char* argv[]) {
 
 				int player;
 				if(!pid_to_player.count(pid)) {
-					pid_to_player[pid] = current_player_index;
-					player             = current_player_index;
+					pid_to_player[pid]                  = current_player_index;
+					player_to_pid[current_player_index] = pid;
+					player                              = current_player_index;
 					current_player_index++;
 				} else {
 					player = pid_to_player[pid];
@@ -768,12 +814,31 @@ int main(int argc, char* argv[]) {
 				}
 
 				level_times[data_id].push_back(NinjiTime { player, time });
+				ninji_times[data_id][player] = time;
 
-				// if(ninji_paths[data_id].size() == 2000) {
-				//	// Break early for testing
-				//	std::cout << "Ending early for testing" << std::endl;
-				//	break;
-				// }
+				if(!best_ninji_time.count(data_id)) {
+					best_ninji_time[data_id] = time;
+				} else {
+					if(time < best_ninji_time[data_id]) {
+						best_ninji_time[data_id] = time;
+					}
+				}
+
+				if(!worst_ninji_time.count(data_id)) {
+					worst_ninji_time[data_id] = time;
+				} else {
+					if(time > worst_ninji_time[data_id]) {
+						worst_ninji_time[data_id] = time;
+					}
+				}
+
+#ifdef STOP_EARLY
+				if(ninji_paths[data_id].size() == 300) {
+					// Break early for testing
+					std::cout << "Ending early for testing" << std::endl;
+					break;
+				}
+#endif
 			}
 
 			row++;
@@ -788,11 +853,16 @@ int main(int argc, char* argv[]) {
 		}
 	}
 
+	std::unordered_map<int, std::vector<int>> ninji_paths_sorted;
 	for(auto& ninji_times : level_times) {
 		std::cout << "Sorting times for " << ninji_times.first << std::endl;
 		std::sort(std::begin(ninji_times.second), std::end(ninji_times.second),
 			[](const auto& lhs, const auto& rhs) { return lhs.time > rhs.time; });
 		level_times_size[ninji_times.first] = ninji_times.second.size();
+
+		for(auto& time : ninji_times.second) {
+			ninji_paths_sorted[ninji_times.first].push_back(time.player);
+		}
 	}
 
 	// Obtain player info
@@ -845,7 +915,7 @@ int main(int argc, char* argv[]) {
 	sqlite3_close(db);
 
 	// Download all images
-	downloadMiis(miis_to_download, miis_to_download_player, mii_images);
+	downloadMiis(miis_to_download, miis_to_download_player, mii_images, player_to_pid);
 	std::cout << "Downloaded " << mii_images.size() << " images" << std::endl;
 	row = 0;
 	for(auto& image : mii_images) {
@@ -886,6 +956,7 @@ int main(int argc, char* argv[]) {
 
 	std::cout << "Cleared Mii vectors" << std::endl;
 
+#ifdef RENDER_PLAYER
 	// Create images for players
 	std::unordered_map<int, std::unordered_map<int, std::unordered_map<int, sk_sp<SkImage>>>> player_image;
 	std::unordered_map<int, std::unordered_map<int, std::unordered_map<int, sk_sp<SkImage>>>> player_mirrored_image;
@@ -949,6 +1020,7 @@ int main(int argc, char* argv[]) {
 	}
 
 	std::cout << "Created player images" << std::endl;
+#endif
 
 	// Create images for flags
 	std::unordered_map<std::string, sk_sp<SkImage>> flag_image;
@@ -1193,10 +1265,10 @@ int main(int argc, char* argv[]) {
 	for(auto data_id : levels_to_render) {
 		std::cout << "Start render for " << data_id << std::endl;
 
-		int frame               = 0;
-		int player_update_frame = 0;
-		int player_update       = 0;
-		bool stop               = false;
+		int frame                  = 0;
+		int player_update          = 0;
+		int player_update_subframe = 0;
+		bool stop                  = false;
 		// Graph goes under this
 		int levels_height = 0;
 		if(level_subworld_image.contains(data_id)) {
@@ -1244,8 +1316,9 @@ int main(int argc, char* argv[]) {
 		codec_context->gop_size     = 10;
 		codec_context->max_b_frames = 1;
 		codec_context->pix_fmt      = AV_PIX_FMT_RGB24;
+		codec_context->bit_rate     = 8e+7;
 		av_opt_set(codec_context->priv_data, "crf", "17", 0);
-		av_opt_set(codec_context->priv_data, "preset", "slow", 0);
+		av_opt_set(codec_context->priv_data, "preset", "veryslow", 0);
 
 		/* open it */
 		if(avcodec_open2(codec_context, codec, NULL) < 0) {
@@ -1276,6 +1349,8 @@ int main(int argc, char* argv[]) {
 
 #ifdef DRAW_NAMES
 		std::string filename = std::to_string(data_id) + "_names.mp4";
+#elif defined(RENDER_LINES)
+		std::string filename = std::to_string(data_id) + "_lines.mp4";
 #else
 		std::string filename = std::to_string(data_id) + ".mp4";
 #endif
@@ -1369,11 +1444,11 @@ int main(int argc, char* argv[]) {
 				canvas->drawSimpleText(rankString.c_str(), rankString.size(), SkTextEncoding::kUTF8,
 					leaderboard_x_offset, y, rankFont, paint);
 				if(player.mii_image) {
-					canvas->drawImage(player.mii_image, leaderboard_x_offset + 70, y - 20);
+					canvas->drawImage(player.mii_image, leaderboard_x_offset + 46, y - 20);
 				}
-				canvas->drawImage(flag_image[player.country], leaderboard_x_offset + 100, y - 20);
+				canvas->drawImage(flag_image[player.country], leaderboard_x_offset + 76, y - 20);
 				canvas->drawSimpleText(player.name.c_str(), player.name.size(), SkTextEncoding::kUTF8,
-					leaderboard_x_offset + 140, y, nameFont, paint);
+					leaderboard_x_offset + 116, y, nameFont, paint);
 			}
 
 			// Draw countries graph
@@ -1411,35 +1486,62 @@ int main(int argc, char* argv[]) {
 			// Draw all players
 			// canvas->scale()
 			int players_rendered = 0;
-			for(auto& ninji : ninji_paths[data_id]) {
-				if(ninji.second.size() > player_update) {
-					auto& player                  = player_info[ninji.first];
-					auto& player_local            = player_local_info[data_id][ninji.first];
+			for(auto player_num : ninji_paths_sorted[data_id]) {
+				auto& frames = ninji_paths[data_id][player_num];
+#ifdef RENDER_PLAYER
+				if(player_update < frames.size()) {
+					auto& player                  = player_info[player_num];
+					auto& player_local            = player_local_info[data_id][player_num];
 					auto& player_sprites          = player_image[data_id][player_local.charactor];
 					auto& player_mirrored_sprites = player_mirrored_image[data_id][player_local.charactor];
 
-					auto& frame = ninji.second[player_update];
+					auto& frame = frames[player_update];
 					// Check that not in pipe transition, very glitchy
 					if(!(frame.flags & 0b00000100)) {
-						ninji_is_subworld[data_id][ninji.first] = frame.flags & 0b00001000;
+						ninji_is_subworld[data_id][player_num] = frame.flags & 0b00001000;
 
 						int x;
 						int y;
-						if(ninji_is_subworld[data_id][ninji.first]) {
-							x = frame.x / 16 - 8 * 13;
-							y = level_subworld_image[data_id]->height() - (frame.y / 16 - 16 * 6)
-								+ level_overworld_image[data_id]->height();
+						if((player_update + 1) < frames.size()) {
+							// Lerp
+							auto& frame_after = frames[player_update + 1];
+							int x_before;
+							int y_before;
+							int x_after;
+							int y_after;
+							if(ninji_is_subworld[data_id][player_num]) {
+								x_before = frame.x / 16 - 8 * 13;
+								x_after  = frame_after.x / 16 - 8 * 13;
+								y_before = level_subworld_image[data_id]->height() - (frame.y / 16 - 16 * 6)
+										   + level_overworld_image[data_id]->height();
+								y_after = level_subworld_image[data_id]->height() - (frame_after.y / 16 - 16 * 6)
+										  + level_overworld_image[data_id]->height();
+							} else {
+								x_before = frame.x / 16 - 8 * 13;
+								x_after  = frame_after.x / 16 - 8 * 13;
+								y_before = level_overworld_image[data_id]->height() - (frame.y / 16 - 16 * 6);
+								y_after  = level_overworld_image[data_id]->height() - (frame_after.y / 16 - 16 * 6);
+							}
+
+							float lerp = player_update_subframe / 4.0;
+							x          = x_before + lerp * (x_after - x_before);
+							y          = y_before + lerp * (y_after - y_before);
 						} else {
-							x = frame.x / 16 - 8 * 13;
-							y = level_overworld_image[data_id]->height() - (frame.y / 16 - 16 * 6);
+							if(ninji_is_subworld[data_id][player_num]) {
+								x = frame.x / 16 - 8 * 13;
+								y = level_subworld_image[data_id]->height() - (frame.y / 16 - 16 * 6)
+									+ level_overworld_image[data_id]->height();
+							} else {
+								x = frame.x / 16 - 8 * 13;
+								y = level_overworld_image[data_id]->height() - (frame.y / 16 - 16 * 6);
+							}
 						}
 
-						if(player_update != 0 && ninji.second[player_update - 1].x != ninji.second[player_update].x) {
-							player_facing[data_id][ninji.first]
-								= ninji.second[player_update].x < ninji.second[player_update - 1].x;
+						if(player_update != 0 && frames[player_update - 1].x != frames[player_update].x) {
+							player_facing[data_id][player_num] = frames[player_update].x < frames[player_update - 1].x;
 						}
 
-						if(player_facing[data_id][ninji.first]) {
+						if(player_facing[data_id][player_num]) {
 							auto sprite = player_mirrored_sprites[frame.state];
 							canvas->drawImage(sprite, x, y - sprite->height());
 						} else {
@@ -1457,9 +1559,10 @@ int main(int argc, char* argv[]) {
 
 					// std::cout << "Draw player " << player.name << " at " << (frame.x / 16) << " " << (frame.y / 16)
 					// << std::endl;
-				} else if(ninji.second.size() == player_update) {
+				} else if(player_update == frames.size() && player_update_subframe == 0) {
 					// Remove from rankings
-					auto& last    = level_times[data_id][level_times[data_id].size() - 1];
+					auto size     = level_times[data_id].size();
+					auto& last    = level_times[data_id][size - 1];
 					auto& country = player_info[last.player].country;
 					if(!countries_so_far.contains(country)) {
 						countries_so_far[country] = 1;
@@ -1468,20 +1571,139 @@ int main(int argc, char* argv[]) {
 					}
 					level_times[data_id].pop_back();
 				}
-			}
+#endif
 
-			if(player_update_frame == 1) {
-				player_update_frame = 0;
-				player_update++;
+#ifdef RENDER_LINES
+				SkPaint linePaint;
+
+				// TODO consider something other than linear interpolation
+				double percentage = (double)(ninji_times[data_id][player_num] - best_ninji_time[data_id])
+									/ (double)(worst_ninji_time[data_id] - best_ninji_time[data_id]);
+				constexpr double curve_constant = 0.005;
+				double exponential_percentage   = std::pow(1.0 - percentage, 1 / curve_constant - 1);
+				SkScalar lineHSV[3];
+				lineHSV[0] = 0.0 + exponential_percentage * 120.0;
+				lineHSV[1] = 1.0;
+				lineHSV[2] = 0.75;
+				linePaint.setColor(SkHSVToColor(lineHSV));
+
+				linePaint.setAlpha(200);
+				linePaint.setStrokeWidth(1);
+				linePaint.setAntiAlias(false);
+
+				if(player_update == frames.size() && player_update_subframe == 0) {
+					// Remove from rankings
+					auto size     = level_times[data_id].size();
+					auto& last    = level_times[data_id][size - 1];
+					auto& country = player_info[last.player].country;
+					if(!countries_so_far.contains(country)) {
+						countries_so_far[country] = 1;
+					} else {
+						countries_so_far[country]++;
+					}
+					level_times[data_id].pop_back();
+				} else {
+					players_rendered++;
+				}
+
+				if(player_update != 0 || player_update_subframe != 0) {
+					int max_update;
+					if(player_update == 0) {
+						max_update = 0;
+					} else if((player_update + 1) < frames.size()) {
+						max_update = player_update;
+					} else {
+						max_update = frames.size() - 1;
+					}
+
+					for(int i = 0; i < max_update; i++) {
+						auto& frame = frames[i];
+						int x;
+						int y;
+						bool is_in_subworld = frame.flags & 0b00001000;
+						if(is_in_subworld) {
+							x = frame.x / 16 - 8 * 13;
+							y = level_subworld_image[data_id]->height() - (frame.y / 16 - 16 * 6)
+								+ level_overworld_image[data_id]->height();
+						} else {
+							x = frame.x / 16 - 8 * 13;
+							y = level_overworld_image[data_id]->height() - (frame.y / 16 - 16 * 6);
+						}
+
+						auto& frame_next = frames[i + 1];
+						int x_next;
+						int y_next;
+						is_in_subworld = frame_next.flags & 0b00001000;
+						if(is_in_subworld) {
+							x_next = frame_next.x / 16 - 8 * 13;
+							y_next = level_subworld_image[data_id]->height() - (frame_next.y / 16 - 16 * 6)
+									 + level_overworld_image[data_id]->height();
+						} else {
+							x_next = frame_next.x / 16 - 8 * 13;
+							y_next = level_overworld_image[data_id]->height() - (frame_next.y / 16 - 16 * 6);
+						}
+
+						if(!(frame_next.flags & 0b00000100)) {
+							canvas->drawLine(
+								SkPoint::Make(x + 8, y - 8), SkPoint::Make(x_next + 8, y_next - 8), linePaint);
+						}
+					}
+
+					if((player_update + 1) < frames.size()) {
+						auto& frame                            = frames[player_update];
+						ninji_is_subworld[data_id][player_num] = frame.flags & 0b00001000;
+
+						// Lerp
+						auto& frame_after = frames[player_update + 1];
+						int x_before;
+						int y_before;
+						int x_after;
+						int y_after;
+						if(ninji_is_subworld[data_id][player_num]) {
+							x_before = frame.x / 16 - 8 * 13;
+							x_after  = frame_after.x / 16 - 8 * 13;
+							y_before = level_subworld_image[data_id]->height() - (frame.y / 16 - 16 * 6)
+									   + level_overworld_image[data_id]->height();
+							y_after = level_subworld_image[data_id]->height() - (frame_after.y / 16 - 16 * 6)
+									  + level_overworld_image[data_id]->height();
+						} else {
+							x_before = frame.x / 16 - 8 * 13;
+							x_after  = frame_after.x / 16 - 8 * 13;
+							y_before = level_overworld_image[data_id]->height() - (frame.y / 16 - 16 * 6);
+							y_after  = level_overworld_image[data_id]->height() - (frame_after.y / 16 - 16 * 6);
+						}
+
+						float lerp = player_update_subframe / 4.0;
+						int x      = x_before + lerp * (x_after - x_before);
+						int y      = y_before + lerp * (y_after - y_before);
+
+						canvas->drawLine(
+							SkPoint::Make(x_before + 8, y_before - 8), SkPoint::Make(x + 8, y - 8), linePaint);
+					}
+				}
+#endif
 			}
 
 			canvas->flush();
+
+			if(player_update_subframe == 3) {
+				player_update_subframe = 0;
+				player_update++;
+			} else {
+				player_update_subframe++;
+			}
+
 			frame++;
-			player_update_frame++;
 
 			if(frame % 1000 == 0) {
 				std::cout << "Rendered frame " << frame << std::endl;
 			}
+
+#ifdef STOP_EARLY
+			if(frame == 2000) {
+				stop = true;
+			}
+#endif
 
 			if(players_rendered == 0) {
 				std::cout << "Finished " << data_id << std::endl;
