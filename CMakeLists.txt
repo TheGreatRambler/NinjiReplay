@@ -85,12 +85,15 @@ execute_process(
 		${CMAKE_CURRENT_BINARY_DIR}/avformat-59.dll)
 set(FFMPEG_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/third_party/ffmpeg/include)
 
+# fmt for some formatting
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/third_party/fmt ${CMAKE_CURRENT_BINARY_DIR}/third_party/fmt)
+
 add_executable(ninjireplay ${APPLICATION_TYPE}
 	src/glad.c
 	src/main.cpp
 )
 
-target_include_directories(ninjireplay PUBLIC include src ${SKIA_DIR} ${SKIA_DIR}/include ${CMAKE_CURRENT_BINARY_DIR}/third_party/zlib ${CMAKE_CURRENT_SOURCE_DIR}/third_party/zlib ${CMAKE_CURRENT_SOURCE_DIR}/third_party/sqlite ${CURL_INCLUDE} ${FFMPEG_INCLUDE} ${CMAKE_CURRENT_SOURCE_DIR}/third_party/sdl/include)
+target_include_directories(ninjireplay PUBLIC include src ${SKIA_DIR} ${SKIA_DIR}/include ${CMAKE_CURRENT_BINARY_DIR}/third_party/zlib ${CMAKE_CURRENT_SOURCE_DIR}/third_party/zlib ${CMAKE_CURRENT_SOURCE_DIR}/third_party/sqlite ${CURL_INCLUDE} ${FFMPEG_INCLUDE} ${CMAKE_CURRENT_SOURCE_DIR}/third_party/sdl/include FMT_HEADERS)
 target_compile_options(ninjireplay PRIVATE -Wall -Wextra)
 
 set_target_properties(ninjireplay PROPERTIES
@@ -99,4 +102,4 @@ set_target_properties(ninjireplay PROPERTIES
 		CXX_VISIBILITY_PRESET hidden
 		POSITION_INDEPENDENT_CODE ON)
 
-target_link_libraries(ninjireplay PUBLIC ${SKIA_LINK}/skia.lib sqlite zlib ${CURL_LIB} SDL2 SDL2main ${AVCODEC_LIB} ${AVUTIL_LIB} ${AVFORMAT_LIB} gdi32 opengl32)
+target_link_libraries(ninjireplay PUBLIC ${SKIA_LINK}/skia.lib sqlite zlib ${CURL_LIB} SDL2 SDL2main ${AVCODEC_LIB} ${AVUTIL_LIB} ${AVFORMAT_LIB} gdi32 opengl32 fmt)

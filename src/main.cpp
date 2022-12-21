@@ -3,6 +3,7 @@
 
 #define SK_RELEASE
 #include <SDL.h>
+#include <chrono>
 #include <codec/SkCodec.h>
 #include <core/SkBitmap.h>
 #include <core/SkCanvas.h>
@@ -17,6 +18,7 @@
 #include <curl/curl.h>
 #include <encode/SkPngEncoder.h>
 #include <filesystem>
+#include <fmt/format.h>
 #include <fstream>
 #include <gpu/GrBackendSurface.h>
 #include <gpu/GrDirectContext.h>
@@ -357,6 +359,12 @@ int main(int argc, char* argv[]) {
 		{ 12171034, "nsmbu" },
 	};
 
+	// Used to determine the threshold of a green path, or a good run
+	static std::unordered_map<int, double> lines_exponential_constant = {
+		{ 12619193, 0.03 },
+		{ 12171034, 0.001 },
+	};
+
 	static std::unordered_map<std::string, int> country_flags = {
 		{ "AC", 0 },
 		{ "AD", 1 },
@@ -618,7 +626,7 @@ int main(int argc, char* argv[]) {
 		{ "ZW", 257 },
 	};
 
-	std::unordered_set<int> levels_to_render = { 12171034 };
+	std::unordered_set<int> levels_to_render = { 12171034, 12619193 };
 	std::unordered_map<int, std::unordered_map<int, std::vector<NinjiFrame>>> ninji_paths;
 	std::unordered_map<int, std::unordered_map<int, int>> ninji_times;
 	std::unordered_map<int, int> best_ninji_time;
@@ -915,6 +923,7 @@ int main(int argc, char* argv[]) {
 	sqlite3_finalize(res);
 	sqlite3_close(db);
 
+#ifdef RENDER_PLAYER
 	// Download all images
 	downloadMiis(miis_to_download, miis_to_download_player, mii_images, player_to_pid);
 	std::cout << "Downloaded " << mii_images.size() << " images" << std::endl;
@@ -957,7 +966,6 @@ int main(int argc, char* argv[]) {
 
 	std::cout << "Cleared Mii vectors" << std::endl;
 
-#ifdef RENDER_PLAYER
 	// Create images for players
 	std::unordered_map<int, std::unordered_map<int, std::unordered_map<int, sk_sp<SkImage>>>> player_image;
 	std::unordered_map<int, std::unordered_map<int, std::unordered_map<int, sk_sp<SkImage>>>> player_mirrored_image;
@@ -1484,6 +1492,66 @@ int main(int argc, char* argv[]) {
 					barPaint);
 			}
 
+#ifdef RENDER_LINES
+			// Render legend
+			// Prime location for legend is on the right side of the country leaderboard, taking up 95% of the height
+			int legend_height          = (int)(countries_graph_height * 0.95);
+			constexpr int start_x      = 45 * 54;
+			int start_y                = levels_height + 10;
+			constexpr int legend_width = 54;
+
+			int range = worst_ninji_time[data_id] - best_ninji_time[data_id];
+
+			// Background of legend
+			SkPaint backgroundPaint;
+			backgroundPaint.setColor(SK_ColorBLACK);
+			canvas->drawRect(SkRect::MakeXYWH(start_x - 10, start_y - 10, legend_width + 20 + 60, legend_height + 20),
+				backgroundPaint);
+
+			// Font for the time itself
+			SkFont timeFont(SkTypeface::MakeFromFile("../assets/fonts/NotoSansJP-Regular.otf"));
+			timeFont.setSize(10);
+			SkPaint timeFontPaint;
+			timeFontPaint.setColor(SK_ColorWHITE);
+
+			SkPaint linePaint;
+			linePaint.setAlpha(200);
+			linePaint.setStrokeWidth(1);
+			linePaint.setAntiAlias(false);
+
+			for(int i = 0; i < legend_height; i++) {
+				double percentage = 1.0 - (i / (double)legend_height);
+				// Using the inverse
+				double exponential_percentage = std::pow(
+					percentage, -lines_exponential_constant[data_id] / (lines_exponential_constant[data_id] - 1));
+				SkScalar lineHSV[3];
+				lineHSV[0] = 0.0 + percentage * 120.0;
+				lineHSV[1] = 1.0;
+				lineHSV[2] = 0.75;
+				linePaint.setColor(SkHSVToColor(lineHSV));
+
+				canvas->drawLine(
+					SkPoint::Make(start_x, start_y + i), SkPoint::Make(start_x + legend_width, start_y + i), linePaint);
+
+				if(i % 15 == 0) {
+					// Get actual time at this pixel
+					int time = (int)((1.0 - exponential_percentage) * range + best_ninji_time[data_id]);
+
+					// Create string
+					int minutes      = (time / (1000 * 60));
+					int seconds      = (time / 1000) % 60;
+					int milliseconds = time % 1000;
+					auto time_string = fmt::format("{:0>2}:{:0>2}.{:0>3}", minutes, seconds, milliseconds);
+
+					canvas->drawSimpleText(time_string.c_str(), strlen(time_string.c_str()), SkTextEncoding::kUTF8,
+						start_x + legend_width + 5, start_y + i + 10, countryCountFont, paint);
+					linePaint.setColor(SK_ColorWHITE);
+					canvas->drawLine(SkPoint::Make(start_x + legend_width, start_y + i),
+						SkPoint::Make(start_x + legend_width + 3, start_y + i), linePaint);
+				}
+			}
+#endif
+
 			// Draw all players
 			// canvas->scale()
 			int players_rendered = 0;
@@ -1578,11 +1646,10 @@ int main(int argc, char* argv[]) {
 				if((player_update + 1) < frames.size()) {
 					SkPaint linePaint;
 
-					// TODO consider something other than linear interpolation
 					double percentage = (double)(ninji_times[data_id][player_num] - best_ninji_time[data_id])
 										/ (double)(worst_ninji_time[data_id] - best_ninji_time[data_id]);
-					constexpr double curve_constant = 0.005;
-					double exponential_percentage   = std::pow(1.0 - percentage, 1 / curve_constant - 1);
+					double exponential_percentage
+						= std::pow(1.0 - percentage, 1 / lines_exponential_constant[data_id] - 1);
 					SkScalar lineHSV[3];
 					lineHSV[0] = 0.0 + exponential_percentage * 120.0;
 					lineHSV[1] = 1.0;
@@ -1686,6 +1753,7 @@ int main(int argc, char* argv[]) {
 							SkPoint::Make(x_before + 8, y_before - 8), SkPoint::Make(x + 8, y - 8), linePaint);
 					}
 				}
+
 #endif
 			}
 
@@ -1734,6 +1802,13 @@ int main(int argc, char* argv[]) {
 
 #ifdef STOP_EARLY
 			if(frame == 2000) {
+				stop = true;
+			}
+#endif
+
+#ifdef RENDER_LINES
+			// TODO this might not be smart, but really we just want the image
+			if(frame == 2) {
 				stop = true;
 			}
 #endif
