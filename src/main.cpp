@@ -2,6 +2,9 @@
 #include "glad/glad.h"
 
 #define SK_RELEASE
+#include <CLI/App.hpp>
+#include <CLI/Config.hpp>
+#include <CLI/Formatter.hpp>
 #include <SDL.h>
 #include <chrono>
 #include <codec/SkCodec.h>
@@ -62,6 +65,8 @@ extern "C" {
 #define RENDER_LINES 1
 
 //#define STOP_EARLY 1
+
+//#define ONLY_FASTEST 1
 
 bool gzip_decompress(uint8_t* input, int input_size, std::vector<uint8_t>& output) {
 	output.clear();
@@ -273,6 +278,17 @@ int main(int argc, char* argv[]) {
 
 	std::cout << "Starting" << std::endl;
 
+	CLI::App app { "App description" };
+
+	std::unordered_set<int> levels_to_render;
+	app.add_option("--ids", levels_to_render, "Level IDs to include");
+
+	CLI11_PARSE(app, argc, argv);
+
+	for(auto id : levels_to_render) {
+		std::cout << "Rendering " << id << std::endl;
+	}
+
 	sqlite3* db;
 	char* err_msg = 0;
 	sqlite3_stmt* res;
@@ -361,6 +377,9 @@ int main(int argc, char* argv[]) {
 
 	// Used to determine the threshold of a green path, or a good run
 	static std::unordered_map<int, double> lines_exponential_constant = {
+		{ 14827235, 0.03 },
+		{ 14328331, 0.04 },
+		{ 13428950, 0.03 },
 		{ 12619193, 0.03 },
 		{ 12171034, 0.001 },
 	};
@@ -626,7 +645,6 @@ int main(int argc, char* argv[]) {
 		{ "ZW", 257 },
 	};
 
-	std::unordered_set<int> levels_to_render = { 12171034, 12619193 };
 	std::unordered_map<int, std::unordered_map<int, std::vector<NinjiFrame>>> ninji_paths;
 	std::unordered_map<int, std::unordered_map<int, int>> ninji_times;
 	std::unordered_map<int, int> best_ninji_time;
@@ -825,22 +843,6 @@ int main(int argc, char* argv[]) {
 				level_times[data_id].push_back(NinjiTime { player, time });
 				ninji_times[data_id][player] = time;
 
-				if(!best_ninji_time.count(data_id)) {
-					best_ninji_time[data_id] = time;
-				} else {
-					if(time < best_ninji_time[data_id]) {
-						best_ninji_time[data_id] = time;
-					}
-				}
-
-				if(!worst_ninji_time.count(data_id)) {
-					worst_ninji_time[data_id] = time;
-				} else {
-					if(time > worst_ninji_time[data_id]) {
-						worst_ninji_time[data_id] = time;
-					}
-				}
-
 #ifdef STOP_EARLY
 				if(ninji_paths[data_id].size() == 300) {
 					// Break early for testing
@@ -867,7 +869,16 @@ int main(int argc, char* argv[]) {
 		std::cout << "Sorting times for " << ninji_times.first << std::endl;
 		std::sort(std::begin(ninji_times.second), std::end(ninji_times.second),
 			[](const auto& lhs, const auto& rhs) { return lhs.time > rhs.time; });
+
+// If only doing 10%, purge the first 90%
+#ifdef ONLY_FASTEST
+		ninji_times.second.erase(
+			ninji_times.second.begin(), ninji_times.second.end() - ninji_times.second.size() * 0.9);
+#endif
+
 		level_times_size[ninji_times.first] = ninji_times.second.size();
+		worst_ninji_time[ninji_times.first] = ninji_times.second[0].time;
+		best_ninji_time[ninji_times.first]  = ninji_times.second[ninji_times.second.size() - 1].time;
 
 		for(auto& time : ninji_times.second) {
 			ninji_paths_sorted[ninji_times.first].push_back(time.player);
@@ -1515,7 +1526,7 @@ int main(int argc, char* argv[]) {
 			timeFontPaint.setColor(SK_ColorWHITE);
 
 			SkPaint linePaint;
-			linePaint.setAlpha(200);
+			linePaint.setAlpha(255);
 			linePaint.setStrokeWidth(1);
 			linePaint.setAntiAlias(false);
 
@@ -1525,7 +1536,7 @@ int main(int argc, char* argv[]) {
 				double exponential_percentage = std::pow(
 					percentage, -lines_exponential_constant[data_id] / (lines_exponential_constant[data_id] - 1));
 				SkScalar lineHSV[3];
-				lineHSV[0] = 0.0 + percentage * 120.0;
+				lineHSV[0] = 15.0 + percentage * 90.0;
 				lineHSV[1] = 1.0;
 				lineHSV[2] = 0.75;
 				linePaint.setColor(SkHSVToColor(lineHSV));
@@ -1651,12 +1662,12 @@ int main(int argc, char* argv[]) {
 					double exponential_percentage
 						= std::pow(1.0 - percentage, 1 / lines_exponential_constant[data_id] - 1);
 					SkScalar lineHSV[3];
-					lineHSV[0] = 0.0 + exponential_percentage * 120.0;
+					lineHSV[0] = 15.0 + exponential_percentage * 90.0;
 					lineHSV[1] = 1.0;
 					lineHSV[2] = 0.75;
 					linePaint.setColor(SkHSVToColor(lineHSV));
 
-					linePaint.setAlpha(200);
+					linePaint.setAlpha(255);
 					linePaint.setStrokeWidth(1);
 					linePaint.setAntiAlias(false);
 
