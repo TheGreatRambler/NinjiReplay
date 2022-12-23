@@ -6,6 +6,7 @@
 #include <CLI/Config.hpp>
 #include <CLI/Formatter.hpp>
 #include <SDL.h>
+#include <bitset>
 #include <chrono>
 #include <codec/SkCodec.h>
 #include <core/SkBitmap.h>
@@ -377,6 +378,22 @@ int main(int argc, char* argv[]) {
 
 	// Used to determine the threshold of a green path, or a good run
 	static std::unordered_map<int, double> lines_exponential_constant = {
+		{ 33883306, 0.09 },
+		{ 29234075, 0.04 },
+		{ 28460377, 0.03 },
+		{ 27439231, 0.02 },
+		{ 26746705, 0.03 },
+		{ 25984384, 0.05 },
+		{ 25459053, 0.07 },
+		{ 25045367, 0.03 },
+		{ 24477739, 0.05 },
+		{ 23738173, 0.01 },
+		{ 23303835, 0.05 },
+		{ 22587491, 0.04 },
+		{ 21858065, 0.01 },
+		{ 20182790, 0.02 },
+		{ 17110274, 0.03 },
+		{ 15675466, 0.01 },
 		{ 14827235, 0.03 },
 		{ 14328331, 0.04 },
 		{ 13428950, 0.03 },
@@ -809,8 +826,10 @@ int main(int argc, char* argv[]) {
 				int frames_size = (frames + 2) / 4;
 
 				size_t current_offset = 0x3C;
+				bool first            = ninji_paths[data_id].size() == 0;
 				for(int i = 0; i < frames_size; i++) {
-					uint8_t flags        = decompressed_replay[current_offset] >> 4;
+					uint8_t flags = decompressed_replay[current_offset] >> 4;
+
 					uint8_t player_state = decompressed_replay[current_offset] & 0x0F;
 					current_offset++;
 					uint16_t x = *(uint16_t*)&decompressed_replay[current_offset];
@@ -818,9 +837,23 @@ int main(int argc, char* argv[]) {
 					uint16_t y = *(uint16_t*)&decompressed_replay[current_offset];
 					current_offset += 2;
 
+					// if(first) {
+					//	std::cout << x << " " << y << " " << std::bitset<8>(flags) << std::endl;
+					// }
+
 					if(flags & 0b00000110) {
 						uint8_t unk1 = decompressed_replay[current_offset];
 						current_offset++;
+
+						// if(first) {
+						//	std::cout << "Unk1 " << std::bitset<8>(unk1) << std::endl;
+						// }
+
+						if(unk1 & 0b00000110) {
+							// TODO
+						} else if(unk1 & 0b00011000) {
+							current_offset += 2;
+						}
 						// ninji_paths[data_id][player].push_back(
 						//	NinjiFrame { player_state, x, y, (NinjiFrameInfo)unk1, flags });
 						//  if(!unique_states.contains(unk1)) {
@@ -832,9 +865,6 @@ int main(int argc, char* argv[]) {
 						//	current_offset += 2;
 						//	toLittleEndianShort(unk2);
 						// }
-					} else {
-						// ninji_paths[data_id][player].push_back(
-						//	NinjiFrame { player_state, x, y, NinjiFrameInfo::NONE, flags });
 					}
 
 					ninji_paths[data_id][player].push_back(NinjiFrame { player_state, x, y, flags });
@@ -872,8 +902,7 @@ int main(int argc, char* argv[]) {
 
 // If only doing 10%, purge the first 90%
 #ifdef ONLY_FASTEST
-		ninji_times.second.erase(
-			ninji_times.second.begin(), ninji_times.second.end() - ninji_times.second.size() * 0.9);
+		ninji_times.second.erase(ninji_times.second.begin(), ninji_times.second.end() - 100);
 #endif
 
 		level_times_size[ninji_times.first] = ninji_times.second.size();
@@ -1507,7 +1536,7 @@ int main(int argc, char* argv[]) {
 			// Render legend
 			// Prime location for legend is on the right side of the country leaderboard, taking up 95% of the height
 			int legend_height          = (int)(countries_graph_height * 0.95);
-			constexpr int start_x      = 45 * 54;
+			constexpr int start_x      = 0;
 			int start_y                = levels_height + 10;
 			constexpr int legend_width = 54;
 
@@ -1531,15 +1560,21 @@ int main(int argc, char* argv[]) {
 			linePaint.setAntiAlias(false);
 
 			for(int i = 0; i < legend_height; i++) {
-				double percentage = 1.0 - (i / (double)legend_height);
+				double percentage = i / (double)legend_height;
 				// Using the inverse
 				double exponential_percentage = std::pow(
-					percentage, -lines_exponential_constant[data_id] / (lines_exponential_constant[data_id] - 1));
-				SkScalar lineHSV[3];
-				lineHSV[0] = 15.0 + percentage * 90.0;
-				lineHSV[1] = 1.0;
-				lineHSV[2] = 0.75;
-				linePaint.setColor(SkHSVToColor(lineHSV));
+					1.0 - percentage, -lines_exponential_constant[data_id] / (lines_exponential_constant[data_id] - 1));
+
+				if(ninji_paths_sorted[data_id].size() * percentage > 10) {
+					SkScalar lineHSV[3];
+					lineHSV[0] = 15.0 + (1.0 - percentage) * 95.0;
+					lineHSV[1] = 1.0;
+					lineHSV[2] = 0.75;
+					linePaint.setColor(SkHSVToColor(lineHSV));
+				} else {
+					// Special color for top 10
+					linePaint.setColor(SkColorSetARGB(255, 128, 206, 255));
+				}
 
 				canvas->drawLine(
 					SkPoint::Make(start_x, start_y + i), SkPoint::Make(start_x + legend_width, start_y + i), linePaint);
@@ -1561,13 +1596,28 @@ int main(int argc, char* argv[]) {
 						SkPoint::Make(start_x + legend_width + 3, start_y + i), linePaint);
 				}
 			}
+
+			// Render box and whisker chart
+			/*
+			int bwc_height  = 150;
+			int bwc_width   = 500;
+			int bwc_start_x = 150;
+			int bwc_start_y = levels_height + 60;
+			backgroundPaint.setColor(SK_ColorWHITE);
+			canvas->drawRect(SkRect::MakeXYWH(bwc_start_x - 2, bwc_start_y, 3, bwc_height), backgroundPaint);
+			canvas->drawRect(
+				SkRect::MakeXYWH(bwc_start_x + bwc_width, bwc_start_y, 3, bwc_height), backgroundPaint);
+			canvas->drawRect(SkRect::MakeXYWH(bwc_start_x, bwc_start_y + 72, bwc_width, 6), backgroundPaint);
+			*/
 #endif
 
 			// Draw all players
 			// canvas->scale()
 			int players_rendered = 0;
-			for(auto player_num : ninji_paths_sorted[data_id]) {
-				auto& frames = ninji_paths[data_id][player_num];
+
+			for(int rank = 0; rank < ninji_paths_sorted[data_id].size(); rank++) {
+				auto player_num = ninji_paths_sorted[data_id][rank];
+				auto& frames    = ninji_paths[data_id][player_num];
 #ifdef RENDER_PLAYER
 				if(player_update < frames.size()) {
 					auto& player                  = player_info[player_num];
@@ -1657,15 +1707,21 @@ int main(int argc, char* argv[]) {
 				if((player_update + 1) < frames.size()) {
 					SkPaint linePaint;
 
-					double percentage = (double)(ninji_times[data_id][player_num] - best_ninji_time[data_id])
-										/ (double)(worst_ninji_time[data_id] - best_ninji_time[data_id]);
-					double exponential_percentage
-						= std::pow(1.0 - percentage, 1 / lines_exponential_constant[data_id] - 1);
-					SkScalar lineHSV[3];
-					lineHSV[0] = 15.0 + exponential_percentage * 90.0;
-					lineHSV[1] = 1.0;
-					lineHSV[2] = 0.75;
-					linePaint.setColor(SkHSVToColor(lineHSV));
+					if(ninji_paths_sorted[data_id].size() - rank > 10) {
+						// if(true) {
+						double percentage = (double)(ninji_times[data_id][player_num] - best_ninji_time[data_id])
+											/ (double)(worst_ninji_time[data_id] - best_ninji_time[data_id]);
+						double exponential_percentage
+							= std::pow(1.0 - percentage, 1 / lines_exponential_constant[data_id] - 1);
+						SkScalar lineHSV[3];
+						lineHSV[0] = 15.0 + exponential_percentage * 95.0;
+						lineHSV[1] = 1.0;
+						lineHSV[2] = 0.75;
+						linePaint.setColor(SkHSVToColor(lineHSV));
+					} else {
+						// Special color for top 10
+						linePaint.setColor(SkColorSetARGB(255, 128, 206, 255));
+					}
 
 					linePaint.setAlpha(255);
 					linePaint.setStrokeWidth(1);
@@ -1726,7 +1782,7 @@ int main(int argc, char* argv[]) {
 							y_next = level_overworld_image[data_id]->height() - (frame_next.y / 16 - 16 * 6);
 						}
 
-						if(!(frame_next.flags & 0b00000100)) {
+						if(!(frame.flags & 0b00000100) && !(frame_next.flags & 0b00000100)) {
 							canvas->drawLine(
 								SkPoint::Make(x + 8, y - 8), SkPoint::Make(x_next + 8, y_next - 8), linePaint);
 						}
