@@ -381,13 +381,13 @@ int main(int argc, char* argv[]) {
 		{ 33883306, 0.09 },
 		{ 29234075, 0.04 },
 		{ 28460377, 0.03 },
-		{ 27439231, 0.02 },
-		{ 26746705, 0.03 },
+		{ 27439231, 0.03 },
+		{ 26746705, 0.04 },
 		{ 25984384, 0.05 },
 		{ 25459053, 0.07 },
 		{ 25045367, 0.03 },
 		{ 24477739, 0.05 },
-		{ 23738173, 0.01 },
+		{ 23738173, 0.02 },
 		{ 23303835, 0.05 },
 		{ 22587491, 0.04 },
 		{ 21858065, 0.01 },
@@ -400,6 +400,8 @@ int main(int argc, char* argv[]) {
 		{ 12619193, 0.03 },
 		{ 12171034, 0.001 },
 	};
+
+	// 23738173 26746705 27439231 29234075 12171034 12619193 13428950 14328331
 
 	static std::unordered_map<std::string, int> country_flags = {
 		{ "AC", 0 },
@@ -1321,9 +1323,9 @@ int main(int argc, char* argv[]) {
 		// Graph goes under this
 		int levels_height = 0;
 		if(level_subworld_image.contains(data_id)) {
-			levels_height = level_overworld_image[data_id]->height() + level_subworld_image[data_id]->height();
+			levels_height = level_overworld_image[data_id]->height() + level_subworld_image[data_id]->height() + 480;
 		} else {
-			levels_height = level_overworld_image[data_id]->height();
+			levels_height = level_overworld_image[data_id]->height() + 240;
 		}
 
 		// Show percent of countries so far
@@ -1464,10 +1466,10 @@ int main(int argc, char* argv[]) {
 			}
 #endif
 
-			canvas->drawImage(level_overworld_image[data_id]->asImage(), 0, 0);
+			canvas->drawImage(level_overworld_image[data_id]->asImage(), 0, 120);
 			if(level_subworld_image.contains(data_id)) {
 				canvas->drawImage(
-					level_subworld_image[data_id]->asImage(), 0, level_overworld_image[data_id]->height());
+					level_subworld_image[data_id]->asImage(), 0, level_overworld_image[data_id]->height() + 360);
 			}
 
 			// Draw both "greenscreens" for chromakey
@@ -1643,14 +1645,15 @@ int main(int argc, char* argv[]) {
 								x_before = frame.x / 16 - 8 * 13;
 								x_after  = frame_after.x / 16 - 8 * 13;
 								y_before = level_subworld_image[data_id]->height() - (frame.y / 16 - 16 * 6)
-										   + level_overworld_image[data_id]->height();
+										   + level_overworld_image[data_id]->height() + 360;
 								y_after = level_subworld_image[data_id]->height() - (frame_after.y / 16 - 16 * 6)
-										  + level_overworld_image[data_id]->height();
+										  + level_overworld_image[data_id]->height() + 360;
 							} else {
 								x_before = frame.x / 16 - 8 * 13;
 								x_after  = frame_after.x / 16 - 8 * 13;
-								y_before = level_overworld_image[data_id]->height() - (frame.y / 16 - 16 * 6);
-								y_after  = level_overworld_image[data_id]->height() - (frame_after.y / 16 - 16 * 6);
+								y_before = level_overworld_image[data_id]->height() - (frame.y / 16 - 16 * 6) + 120;
+								y_after
+									= level_overworld_image[data_id]->height() - (frame_after.y / 16 - 16 * 6) + 120;
 							}
 
 							float lerp = player_update_subframe / 4.0;
@@ -1660,10 +1663,10 @@ int main(int argc, char* argv[]) {
 							if(ninji_is_subworld[data_id][player_num]) {
 								x = frame.x / 16 - 8 * 13;
 								y = level_subworld_image[data_id]->height() - (frame.y / 16 - 16 * 6)
-									+ level_overworld_image[data_id]->height();
+									+ level_overworld_image[data_id]->height() + 360;
 							} else {
 								x = frame.x / 16 - 8 * 13;
-								y = level_overworld_image[data_id]->height() - (frame.y / 16 - 16 * 6);
+								y = level_overworld_image[data_id]->height() - (frame.y / 16 - 16 * 6) + 120;
 							}
 						}
 
@@ -1763,10 +1766,10 @@ int main(int argc, char* argv[]) {
 						if(is_in_subworld) {
 							x = frame.x / 16 - 8 * 13;
 							y = level_subworld_image[data_id]->height() - (frame.y / 16 - 16 * 6)
-								+ level_overworld_image[data_id]->height();
+								+ level_overworld_image[data_id]->height() + 360;
 						} else {
 							x = frame.x / 16 - 8 * 13;
-							y = level_overworld_image[data_id]->height() - (frame.y / 16 - 16 * 6);
+							y = level_overworld_image[data_id]->height() - (frame.y / 16 - 16 * 6) + 120;
 						}
 
 						auto& frame_next = frames[i + 1];
@@ -1776,10 +1779,10 @@ int main(int argc, char* argv[]) {
 						if(is_in_subworld) {
 							x_next = frame_next.x / 16 - 8 * 13;
 							y_next = level_subworld_image[data_id]->height() - (frame_next.y / 16 - 16 * 6)
-									 + level_overworld_image[data_id]->height();
+									 + level_overworld_image[data_id]->height() + 360;
 						} else {
 							x_next = frame_next.x / 16 - 8 * 13;
-							y_next = level_overworld_image[data_id]->height() - (frame_next.y / 16 - 16 * 6);
+							y_next = level_overworld_image[data_id]->height() - (frame_next.y / 16 - 16 * 6) + 120;
 						}
 
 						if(!(frame.flags & 0b00000100) && !(frame_next.flags & 0b00000100)) {
@@ -1802,14 +1805,14 @@ int main(int argc, char* argv[]) {
 							x_before = frame.x / 16 - 8 * 13;
 							x_after  = frame_after.x / 16 - 8 * 13;
 							y_before = level_subworld_image[data_id]->height() - (frame.y / 16 - 16 * 6)
-									   + level_overworld_image[data_id]->height();
+									   + level_overworld_image[data_id]->height() + 360;
 							y_after = level_subworld_image[data_id]->height() - (frame_after.y / 16 - 16 * 6)
-									  + level_overworld_image[data_id]->height();
+									  + level_overworld_image[data_id]->height() + 360;
 						} else {
 							x_before = frame.x / 16 - 8 * 13;
 							x_after  = frame_after.x / 16 - 8 * 13;
-							y_before = level_overworld_image[data_id]->height() - (frame.y / 16 - 16 * 6);
-							y_after  = level_overworld_image[data_id]->height() - (frame_after.y / 16 - 16 * 6);
+							y_before = level_overworld_image[data_id]->height() - (frame.y / 16 - 16 * 6) + 120;
+							y_after  = level_overworld_image[data_id]->height() - (frame_after.y / 16 - 16 * 6) + 120;
 						}
 
 						float lerp = player_update_subframe / 4.0;
