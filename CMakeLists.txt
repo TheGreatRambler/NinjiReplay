@@ -105,4 +105,4 @@ set_target_properties(ninjireplay PROPERTIES
 		CXX_VISIBILITY_PRESET hidden
 		POSITION_INDEPENDENT_CODE ON)
 
-target_link_libraries(ninjireplay PUBLIC ${SKIA_LINK}/skia.lib sqlite zlib ${CURL_LIB} SDL2 SDL2main ${AVCODEC_LIB} ${AVUTIL_LIB} ${AVFORMAT_LIB} gdi32 opengl32 fmt CLI11::CLI11)
+target_link_libraries(ninjireplay PUBLIC ${SKIA_LINK}/skia.lib sqlite zlib ${CURL_LIB} SDL2-static SDL2main ${AVCODEC_LIB} ${AVUTIL_LIB} ${AVFORMAT_LIB} gdi32 opengl32 fmt CLI11::CLI11)

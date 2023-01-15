@@ -62,12 +62,16 @@ extern "C" {
 
 //#define DRAW_NAMES 1
 
-//#define RENDER_PLAYER 1
-#define RENDER_LINES 1
+#define RENDER_PLAYER 1
+//#define RENDER_LINES 1
 
 //#define STOP_EARLY 1
 
 //#define ONLY_FASTEST 1
+
+// Looks better in slowmo
+#define NUM_SUBFRAMES 30
+#define SIZE_MULTIPLIER 2
 
 bool gzip_decompress(uint8_t* input, int input_size, std::vector<uint8_t>& output) {
 	output.clear();
@@ -986,10 +990,10 @@ int main(int argc, char* argv[]) {
 		jpeg->getPixels(info, bitmap.getPixels(), bitmap.rowBytes());
 		bitmap.setImmutable();
 
-		sk_sp<SkSurface> rasterSurface = SkSurface::MakeRasterN32Premul(24, 24);
+		sk_sp<SkSurface> rasterSurface = SkSurface::MakeRasterN32Premul(24 * SIZE_MULTIPLIER, 24 * SIZE_MULTIPLIER);
 		rasterSurface->getCanvas()->drawImageRect(bitmap.asImage(), SkRect::MakeLTRB(75, 75, 512 - 75, 512 - 75),
-			SkRect::MakeWH(24, 24), SkSamplingOptions(SkFilterMode::kNearest), nullptr,
-			SkCanvas::kStrict_SrcRectConstraint);
+			SkRect::MakeWH(24 * SIZE_MULTIPLIER, 24 * SIZE_MULTIPLIER), SkSamplingOptions(SkFilterMode::kNearest),
+			nullptr, SkCanvas::kStrict_SrcRectConstraint);
 
 		player_info[image.first].mii_image = rasterSurface->makeImageSnapshot();
 
@@ -1049,22 +1053,37 @@ int main(int argc, char* argv[]) {
 				SkBitmap* bitmap     = new SkBitmap();
 				std::string filename = std::string("../assets/players/") + player_name + "/" + gamestyle[data_id] + "/"
 									   + std::to_string(state) + ".png";
+
 				if(!std::filesystem::exists(filename)) {
 					filename = std::string("../assets/players/") + player_name + "/" + std::to_string(state) + ".png";
 				}
+
 				std::unique_ptr<SkCodec> player_sprite
 					= SkCodec::MakeFromStream(SkStream::MakeFromFile(filename.c_str()));
 				SkImageInfo info = player_sprite->getInfo().makeColorType(kBGRA_8888_SkColorType);
 				bitmap->allocPixels(info);
 				player_sprite->getPixels(info, bitmap->getPixels(), bitmap->rowBytes());
 				bitmap->setImmutable();
-				player_image[data_id][player][state] = bitmap->asImage();
 
-				sk_sp<SkSurface> rasterSurface = SkSurface::MakeRasterN32Premul(bitmap->width(), bitmap->height());
-				SkCanvas* rasterCanvas         = rasterSurface->getCanvas();
-				rasterCanvas->translate(bitmap->width(), 0);
-				rasterCanvas->scale(-1, 1);
-				rasterCanvas->drawImage(bitmap->asImage(), 0, 0);
+				// Increase size of sprite
+				sk_sp<SkSurface> rasterSurface = SkSurface::MakeRasterN32Premul(
+					bitmap->width() * SIZE_MULTIPLIER, bitmap->height() * SIZE_MULTIPLIER);
+				rasterSurface->getCanvas()->drawImageRect(bitmap->asImage(),
+					SkRect::MakeLTRB(0, 0, bitmap->width(), bitmap->height()),
+					SkRect::MakeWH(bitmap->width() * SIZE_MULTIPLIER, bitmap->height() * SIZE_MULTIPLIER),
+					SkSamplingOptions(SkFilterMode::kNearest), nullptr, SkCanvas::kStrict_SrcRectConstraint);
+				player_image[data_id][player][state] = rasterSurface->makeImageSnapshot();
+
+				// Sprite facing other direction
+				rasterSurface = SkSurface::MakeRasterN32Premul(
+					bitmap->width() * SIZE_MULTIPLIER, bitmap->height() * SIZE_MULTIPLIER);
+				// Scale for facing opposite direction
+				rasterSurface->getCanvas()->translate(bitmap->width() * SIZE_MULTIPLIER, 0);
+				rasterSurface->getCanvas()->scale(-1, 1);
+				rasterSurface->getCanvas()->drawImageRect(bitmap->asImage(),
+					SkRect::MakeLTRB(0, 0, bitmap->width(), bitmap->height()),
+					SkRect::MakeWH(bitmap->width() * SIZE_MULTIPLIER, bitmap->height() * SIZE_MULTIPLIER),
+					SkSamplingOptions(SkFilterMode::kNearest), nullptr, SkCanvas::kStrict_SrcRectConstraint);
 				player_mirrored_image[data_id][player][state] = rasterSurface->makeImageSnapshot();
 			}
 		}
@@ -1084,9 +1103,10 @@ int main(int argc, char* argv[]) {
 		flag_codec->getPixels(info, bitmap->getPixels(), bitmap->rowBytes());
 		bitmap->setImmutable();
 
-		sk_sp<SkSurface> rasterSurface = SkSurface::MakeRasterN32Premul(36, 24);
-		rasterSurface->getCanvas()->drawImageRect(bitmap->asImage(), SkRect::MakeWH(180, 120), SkRect::MakeWH(36, 24),
-			SkSamplingOptions(SkFilterMode::kNearest), nullptr, SkCanvas::kStrict_SrcRectConstraint);
+		sk_sp<SkSurface> rasterSurface = SkSurface::MakeRasterN32Premul(36 * SIZE_MULTIPLIER, 24 * SIZE_MULTIPLIER);
+		rasterSurface->getCanvas()->drawImageRect(bitmap->asImage(), SkRect::MakeWH(180, 120),
+			SkRect::MakeWH(36 * SIZE_MULTIPLIER, 24 * SIZE_MULTIPLIER), SkSamplingOptions(SkFilterMode::kNearest),
+			nullptr, SkCanvas::kStrict_SrcRectConstraint);
 
 		flag_image[flag] = rasterSurface->makeImageSnapshot();
 	}
@@ -1094,8 +1114,8 @@ int main(int argc, char* argv[]) {
 	std::cout << "Created flag images" << std::endl;
 
 	// Create images for levels
-	std::unordered_map<int, SkBitmap*> level_overworld_image;
-	std::unordered_map<int, SkBitmap*> level_subworld_image;
+	std::unordered_map<int, sk_sp<SkImage>> level_overworld_image;
+	std::unordered_map<int, sk_sp<SkImage>> level_subworld_image;
 	for(auto& level : levels_to_render) {
 		std::string overworld_path = std::string("../assets/levels/") + std::to_string(level) + ".bcd.overworld.png";
 		SkBitmap* overworld_bitmap = new SkBitmap();
@@ -1105,7 +1125,14 @@ int main(int argc, char* argv[]) {
 		overworld_bitmap->allocPixels(info);
 		overworld_codec->getPixels(info, overworld_bitmap->getPixels(), overworld_bitmap->rowBytes());
 		overworld_bitmap->setImmutable();
-		level_overworld_image[level] = overworld_bitmap;
+
+		sk_sp<SkSurface> rasterSurface = SkSurface::MakeRasterN32Premul(
+			overworld_bitmap->width() * SIZE_MULTIPLIER, overworld_bitmap->height() * SIZE_MULTIPLIER);
+		rasterSurface->getCanvas()->drawImageRect(overworld_bitmap->asImage(),
+			SkRect::MakeLTRB(0, 0, overworld_bitmap->width(), overworld_bitmap->height()),
+			SkRect::MakeWH(overworld_bitmap->width() * SIZE_MULTIPLIER, overworld_bitmap->height() * SIZE_MULTIPLIER),
+			SkSamplingOptions(SkFilterMode::kNearest), nullptr, SkCanvas::kStrict_SrcRectConstraint);
+		level_overworld_image[level] = rasterSurface->makeImageSnapshot();
 
 		std::string subworld_path = std::string("../assets/levels/") + std::to_string(level) + ".bcd.subworld.png";
 		if(std::filesystem::exists(subworld_path)) {
@@ -1116,7 +1143,14 @@ int main(int argc, char* argv[]) {
 			subworld_bitmap->allocPixels(info2);
 			subworld_codec->getPixels(info2, subworld_bitmap->getPixels(), subworld_bitmap->rowBytes());
 			subworld_bitmap->setImmutable();
-			level_subworld_image[level] = subworld_bitmap;
+
+			rasterSurface = SkSurface::MakeRasterN32Premul(
+				subworld_bitmap->width() * SIZE_MULTIPLIER, subworld_bitmap->height() * SIZE_MULTIPLIER);
+			rasterSurface->getCanvas()->drawImageRect(subworld_bitmap->asImage(),
+				SkRect::MakeLTRB(0, 0, subworld_bitmap->width(), subworld_bitmap->height()),
+				SkRect::MakeWH(subworld_bitmap->width() * SIZE_MULTIPLIER, subworld_bitmap->height() * SIZE_MULTIPLIER),
+				SkSamplingOptions(SkFilterMode::kNearest), nullptr, SkCanvas::kStrict_SrcRectConstraint);
+			level_subworld_image[level] = rasterSurface->makeImageSnapshot();
 		}
 	}
 
@@ -1127,10 +1161,12 @@ int main(int argc, char* argv[]) {
 	paint.setAntiAlias(false);
 	paint.setColor(SK_ColorWHITE);
 
-	int leaderboard_x_offset   = 3840;
-	int leaderboard_width      = 352;
-	int leaderboard_height     = 1080;
-	int countries_graph_height = 500;
+	int leaderboard_x_offset   = 3840 * SIZE_MULTIPLIER;
+	int leaderboard_width      = 352 * SIZE_MULTIPLIER;
+	int leaderboard_height     = 1080 * SIZE_MULTIPLIER;
+	int countries_graph_height = 500 * SIZE_MULTIPLIER;
+	int timer_x                = 1000 * SIZE_MULTIPLIER;
+	int timer_y                = (432 + 2688 + 20) * SIZE_MULTIPLIER;
 
 #ifdef RENDER_SCREEN
 	// Start rendering to screen
@@ -1191,7 +1227,7 @@ int main(int argc, char* argv[]) {
 	//}
 	// Choose max possible to encompass all
 	dm.w = leaderboard_x_offset + leaderboard_width;
-	dm.h = 432 + 2688 + countries_graph_height;
+	dm.h = (432 + 2688) * SIZE_MULTIPLIER + countries_graph_height;
 
 	SDL_Window* window
 		= SDL_CreateWindow("SDL Window", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, dm.w, dm.h, windowFlags);
@@ -1299,17 +1335,21 @@ int main(int argc, char* argv[]) {
 #endif
 
 	SkFont nameFont(SkTypeface::MakeFromFile("../assets/fonts/NotoSansJP-Regular.otf"));
-	nameFont.setSize(15);
+	nameFont.setSize(15 * SIZE_MULTIPLIER);
 	SkFont rankFont(SkTypeface::MakeFromFile("../assets/fonts/NotoSansJP-Regular.otf"));
-	rankFont.setSize(20);
+	rankFont.setSize(20 * SIZE_MULTIPLIER);
 	SkFont countryCountFont(SkTypeface::MakeFromFile("../assets/fonts/NotoSansJP-Regular.otf"));
-	rankFont.setSize(10);
+	rankFont.setSize(10 * SIZE_MULTIPLIER);
 	SkFont hoverNameFont(SkTypeface::MakeFromFile("../assets/fonts/NotoSansJP-Regular.otf"));
-	hoverNameFont.setSize(10);
+	hoverNameFont.setSize(10 * SIZE_MULTIPLIER);
+	SkFont timerFont(SkTypeface::MakeFromFile("../assets/fonts/NotoSansJP-Regular.otf"));
+	timerFont.setSize(90 * SIZE_MULTIPLIER);
 
 	SkPaint hoverNamePaint;
 	hoverNamePaint.setColor(SK_ColorWHITE);
 	hoverNamePaint.setAlpha(150);
+	SkPaint timerPaint;
+	timerPaint.setColor(SK_ColorWHITE);
 
 	std::cout << "Prepare to render" << std::endl;
 
@@ -1323,9 +1363,10 @@ int main(int argc, char* argv[]) {
 		// Graph goes under this
 		int levels_height = 0;
 		if(level_subworld_image.contains(data_id)) {
-			levels_height = level_overworld_image[data_id]->height() + level_subworld_image[data_id]->height() + 480;
+			levels_height = level_overworld_image[data_id]->height() + level_subworld_image[data_id]->height()
+							+ 480 * SIZE_MULTIPLIER;
 		} else {
-			levels_height = level_overworld_image[data_id]->height() + 240;
+			levels_height = level_overworld_image[data_id]->height() + 240 * SIZE_MULTIPLIER;
 		}
 
 		// Show percent of countries so far
@@ -1466,10 +1507,10 @@ int main(int argc, char* argv[]) {
 			}
 #endif
 
-			canvas->drawImage(level_overworld_image[data_id]->asImage(), 0, 120);
+			canvas->drawImage(level_overworld_image[data_id], 0, 120 * SIZE_MULTIPLIER);
 			if(level_subworld_image.contains(data_id)) {
 				canvas->drawImage(
-					level_subworld_image[data_id]->asImage(), 0, level_overworld_image[data_id]->height() + 360);
+					level_subworld_image[data_id], 0, level_overworld_image[data_id]->height() + 360 * SIZE_MULTIPLIER);
 			}
 
 			// Draw both "greenscreens" for chromakey
@@ -1490,17 +1531,28 @@ int main(int argc, char* argv[]) {
 				auto& time   = level_times[data_id][index];
 				auto& player = player_info[time.player];
 
-				int y                  = (rank + 1) * 36;
+				int y                  = (rank + 1) * 36 * SIZE_MULTIPLIER;
 				std::string rankString = std::to_string(level_times_size[data_id] - index);
 				canvas->drawSimpleText(rankString.c_str(), rankString.size(), SkTextEncoding::kUTF8,
 					leaderboard_x_offset, y, rankFont, paint);
 				if(player.mii_image) {
-					canvas->drawImage(player.mii_image, leaderboard_x_offset + 46, y - 20);
+					canvas->drawImage(
+						player.mii_image, leaderboard_x_offset + 46 * SIZE_MULTIPLIER, y - 20 * SIZE_MULTIPLIER);
 				}
-				canvas->drawImage(flag_image[player.country], leaderboard_x_offset + 76, y - 20);
+				canvas->drawImage(
+					flag_image[player.country], leaderboard_x_offset + 76 * SIZE_MULTIPLIER, y - 20 * SIZE_MULTIPLIER);
 				canvas->drawSimpleText(player.name.c_str(), player.name.size(), SkTextEncoding::kUTF8,
-					leaderboard_x_offset + 116, y, nameFont, paint);
+					leaderboard_x_offset + 116 * SIZE_MULTIPLIER, y, nameFont, paint);
 			}
+
+			// Draw timer
+			int time         = (player_update / 15.0 + player_update_subframe / (15.0 * NUM_SUBFRAMES)) * 1000.0;
+			int minutes      = (time / (1000 * 60));
+			int seconds      = (time / 1000) % 60;
+			int milliseconds = time % 1000;
+			auto time_string = fmt::format("{:0>2}:{:0>2}.{:0>3}", minutes, seconds, milliseconds);
+			canvas->drawSimpleText(time_string.c_str(), strlen(time_string.c_str()), SkTextEncoding::kUTF8, timer_x,
+				timer_y, timerFont, timerPaint);
 
 			// Draw countries graph
 			std::vector<std::pair<std::string, int>> sorted_country_counts;
@@ -1519,18 +1571,21 @@ int main(int argc, char* argv[]) {
 					biggest_size = entry.second;
 				}
 
-				int startX = i * 54;
-				canvas->drawImage(flag_image[entry.first], startX + 9, levels_height + countries_graph_height - 24);
+				int start_x = i * 54 * SIZE_MULTIPLIER;
+				canvas->drawImage(flag_image[entry.first], start_x + 9 * SIZE_MULTIPLIER,
+					levels_height + countries_graph_height - 24 * SIZE_MULTIPLIER);
 				std::string numString = std::to_string(entry.second);
-				canvas->drawSimpleText(numString.c_str(), numString.size(), SkTextEncoding::kUTF8, startX + 7,
-					levels_height + countries_graph_height - 30, countryCountFont, paint);
+				canvas->drawSimpleText(numString.c_str(), numString.size(), SkTextEncoding::kUTF8,
+					start_x + 7 * SIZE_MULTIPLIER, levels_height + countries_graph_height - 30 * SIZE_MULTIPLIER,
+					countryCountFont, paint);
 
 				// Draw graph bar
 				int bar_height = total_height * ((float)entry.second / biggest_size);
 				SkPaint barPaint;
 				barPaint.setColor(SK_ColorWHITE);
-				canvas->drawRect(SkRect::MakeXYWH((float)startX + 9.0f,
-									 (float)(levels_height + total_height - bar_height), 36.0f, (float)bar_height),
+				canvas->drawRect(
+					SkRect::MakeXYWH((float)start_x + 9.0f * SIZE_MULTIPLIER,
+						(float)(levels_height + total_height - bar_height), 36.0f * SIZE_MULTIPLIER, (float)bar_height),
 					barPaint);
 			}
 
@@ -1539,20 +1594,21 @@ int main(int argc, char* argv[]) {
 			// Prime location for legend is on the right side of the country leaderboard, taking up 95% of the height
 			int legend_height          = (int)(countries_graph_height * 0.95);
 			constexpr int start_x      = 0;
-			int start_y                = levels_height + 10;
-			constexpr int legend_width = 54;
+			int start_y                = levels_height + 10 * SIZE_MULTIPLIER;
+			constexpr int legend_width = 54 * SIZE_MULTIPLIER;
 
 			int range = worst_ninji_time[data_id] - best_ninji_time[data_id];
 
 			// Background of legend
 			SkPaint backgroundPaint;
 			backgroundPaint.setColor(SK_ColorBLACK);
-			canvas->drawRect(SkRect::MakeXYWH(start_x - 10, start_y - 10, legend_width + 20 + 60, legend_height + 20),
+			canvas->drawRect(SkRect::MakeXYWH(start_x - 10 * SIZE_MULTIPLIER, start_y - 10 * SIZE_MULTIPLIER,
+								 legend_width + (20 + 60) * SIZE_MULTIPLIER, legend_height + 20 * SIZE_MULTIPLIER),
 				backgroundPaint);
 
 			// Font for the time itself
 			SkFont timeFont(SkTypeface::MakeFromFile("../assets/fonts/NotoSansJP-Regular.otf"));
-			timeFont.setSize(10);
+			timeFont.setSize(10 * SIZE_MULTIPLIER);
 			SkPaint timeFontPaint;
 			timeFontPaint.setColor(SK_ColorWHITE);
 
@@ -1581,7 +1637,7 @@ int main(int argc, char* argv[]) {
 				canvas->drawLine(
 					SkPoint::Make(start_x, start_y + i), SkPoint::Make(start_x + legend_width, start_y + i), linePaint);
 
-				if(i % 15 == 0) {
+				if(i % 25 == 0) {
 					// Get actual time at this pixel
 					int time = (int)((1.0 - exponential_percentage) * range + best_ninji_time[data_id]);
 
@@ -1592,10 +1648,11 @@ int main(int argc, char* argv[]) {
 					auto time_string = fmt::format("{:0>2}:{:0>2}.{:0>3}", minutes, seconds, milliseconds);
 
 					canvas->drawSimpleText(time_string.c_str(), strlen(time_string.c_str()), SkTextEncoding::kUTF8,
-						start_x + legend_width + 5, start_y + i + 10, countryCountFont, paint);
+						start_x + legend_width + 5 * SIZE_MULTIPLIER, start_y + i + 10 * SIZE_MULTIPLIER,
+						countryCountFont, paint);
 					linePaint.setColor(SK_ColorWHITE);
 					canvas->drawLine(SkPoint::Make(start_x + legend_width, start_y + i),
-						SkPoint::Make(start_x + legend_width + 3, start_y + i), linePaint);
+						SkPoint::Make(start_x + legend_width + 3 * SIZE_MULTIPLIER, start_y + i), linePaint);
 				}
 			}
 
@@ -1642,31 +1699,36 @@ int main(int argc, char* argv[]) {
 							int x_after;
 							int y_after;
 							if(ninji_is_subworld[data_id][player_num]) {
-								x_before = frame.x / 16 - 8 * 13;
-								x_after  = frame_after.x / 16 - 8 * 13;
-								y_before = level_subworld_image[data_id]->height() - (frame.y / 16 - 16 * 6)
-										   + level_overworld_image[data_id]->height() + 360;
-								y_after = level_subworld_image[data_id]->height() - (frame_after.y / 16 - 16 * 6)
-										  + level_overworld_image[data_id]->height() + 360;
+								x_before = (frame.x / 16.0 - 8 * 13) * SIZE_MULTIPLIER;
+								x_after  = (frame_after.x / 16.0 - 8 * 13) * SIZE_MULTIPLIER;
+								y_before = level_subworld_image[data_id]->height()
+										   - (frame.y / 16.0 - 16 * 6) * SIZE_MULTIPLIER
+										   + level_overworld_image[data_id]->height() + 360 * SIZE_MULTIPLIER;
+								y_after = level_subworld_image[data_id]->height()
+										  - (frame_after.y / 16.0 - 16 * 6) * SIZE_MULTIPLIER
+										  + level_overworld_image[data_id]->height() + 360 * SIZE_MULTIPLIER;
 							} else {
-								x_before = frame.x / 16 - 8 * 13;
-								x_after  = frame_after.x / 16 - 8 * 13;
-								y_before = level_overworld_image[data_id]->height() - (frame.y / 16 - 16 * 6) + 120;
-								y_after
-									= level_overworld_image[data_id]->height() - (frame_after.y / 16 - 16 * 6) + 120;
+								x_before = (frame.x / 16.0 - 8 * 13) * SIZE_MULTIPLIER;
+								x_after  = (frame_after.x / 16.0 - 8 * 13) * SIZE_MULTIPLIER;
+								y_before = level_overworld_image[data_id]->height()
+										   - (frame.y / 16.0 - 16 * 6) * SIZE_MULTIPLIER + 120 * SIZE_MULTIPLIER;
+								y_after = level_overworld_image[data_id]->height()
+										  - (frame_after.y / 16.0 - 16 * 6) * SIZE_MULTIPLIER + 120 * SIZE_MULTIPLIER;
 							}
 
-							float lerp = player_update_subframe / 4.0;
+							float lerp = player_update_subframe / (double)NUM_SUBFRAMES;
 							x          = x_before + lerp * (x_after - x_before);
 							y          = y_before + lerp * (y_after - y_before);
 						} else {
 							if(ninji_is_subworld[data_id][player_num]) {
-								x = frame.x / 16 - 8 * 13;
-								y = level_subworld_image[data_id]->height() - (frame.y / 16 - 16 * 6)
-									+ level_overworld_image[data_id]->height() + 360;
+								x = (frame.x / 16.0 - 8 * 13) * SIZE_MULTIPLIER;
+								y = level_subworld_image[data_id]->height()
+									- (frame.y / 16.0 - 16 * 6) * SIZE_MULTIPLIER
+									+ level_overworld_image[data_id]->height() + 360 * SIZE_MULTIPLIER;
 							} else {
-								x = frame.x / 16 - 8 * 13;
-								y = level_overworld_image[data_id]->height() - (frame.y / 16 - 16 * 6) + 120;
+								x = (frame.x / 16.0 - 8 * 13) * SIZE_MULTIPLIER;
+								y = level_overworld_image[data_id]->height()
+									- (frame.y / 16.0 - 16 * 6) * SIZE_MULTIPLIER + 120 * SIZE_MULTIPLIER;
 							}
 						}
 
@@ -1692,7 +1754,7 @@ int main(int argc, char* argv[]) {
 
 					// std::cout << "Draw player " << player.name << " at " << (frame.x / 16) << " " << (frame.y / 16)
 					// << std::endl;
-				} else if(player_update == frames.size() && player_update_subframe == 0) {
+				} else if(player_update == frames.size() - 1 && player_update_subframe == NUM_SUBFRAMES - 1) {
 					// Remove from rankings
 					auto size     = level_times[data_id].size();
 					auto& last    = level_times[data_id][size - 1];
@@ -1764,12 +1826,13 @@ int main(int argc, char* argv[]) {
 						int y;
 						bool is_in_subworld = frame.flags & 0b00001000;
 						if(is_in_subworld) {
-							x = frame.x / 16 - 8 * 13;
-							y = level_subworld_image[data_id]->height() - (frame.y / 16 - 16 * 6)
-								+ level_overworld_image[data_id]->height() + 360;
+							x = (frame.x / 16.0 - 8 * 13) * SIZE_MULTIPLIER;
+							y = level_subworld_image[data_id]->height() - (frame.y / 16.0 - 16 * 6) * SIZE_MULTIPLIER
+								+ level_overworld_image[data_id]->height() + 360 * SIZE_MULTIPLIER;
 						} else {
-							x = frame.x / 16 - 8 * 13;
-							y = level_overworld_image[data_id]->height() - (frame.y / 16 - 16 * 6) + 120;
+							x = (frame.x / 16.0 - 8 * 13) * SIZE_MULTIPLIER;
+							y = level_overworld_image[data_id]->height() - (frame.y / 16.0 - 16 * 6) * SIZE_MULTIPLIER
+								+ 120 * SIZE_MULTIPLIER;
 						}
 
 						auto& frame_next = frames[i + 1];
@@ -1777,17 +1840,19 @@ int main(int argc, char* argv[]) {
 						int y_next;
 						is_in_subworld = frame_next.flags & 0b00001000;
 						if(is_in_subworld) {
-							x_next = frame_next.x / 16 - 8 * 13;
-							y_next = level_subworld_image[data_id]->height() - (frame_next.y / 16 - 16 * 6)
-									 + level_overworld_image[data_id]->height() + 360;
+							x_next = (frame_next.x / 16.0 - 8 * 13) * SIZE_MULTIPLIER;
+							y_next = level_subworld_image[data_id]->height()
+									 - (frame_next.y / 16.0 - 16 * 6) * SIZE_MULTIPLIER
+									 + level_overworld_image[data_id]->height() + 360 * SIZE_MULTIPLIER;
 						} else {
-							x_next = frame_next.x / 16 - 8 * 13;
-							y_next = level_overworld_image[data_id]->height() - (frame_next.y / 16 - 16 * 6) + 120;
+							x_next = (frame_next.x / 16.0 - 8 * 13) * SIZE_MULTIPLIER;
+							y_next = level_overworld_image[data_id]->height()
+									 - (frame_next.y / 16.0 - 16 * 6) * SIZE_MULTIPLIER + 120 * SIZE_MULTIPLIER;
 						}
 
 						if(!(frame.flags & 0b00000100) && !(frame_next.flags & 0b00000100)) {
-							canvas->drawLine(
-								SkPoint::Make(x + 8, y - 8), SkPoint::Make(x_next + 8, y_next - 8), linePaint);
+							canvas->drawLine(SkPoint::Make(x + 8 * SIZE_MULTIPLIER, y - 8 * SIZE_MULTIPLIER),
+								SkPoint::Make(x_next + 8 * SIZE_MULTIPLIER, y_next - 8 * SIZE_MULTIPLIER), linePaint);
 						}
 					}
 
@@ -1802,25 +1867,29 @@ int main(int argc, char* argv[]) {
 						int x_after;
 						int y_after;
 						if(ninji_is_subworld[data_id][player_num]) {
-							x_before = frame.x / 16 - 8 * 13;
-							x_after  = frame_after.x / 16 - 8 * 13;
-							y_before = level_subworld_image[data_id]->height() - (frame.y / 16 - 16 * 6)
-									   + level_overworld_image[data_id]->height() + 360;
-							y_after = level_subworld_image[data_id]->height() - (frame_after.y / 16 - 16 * 6)
-									  + level_overworld_image[data_id]->height() + 360;
+							x_before = (frame.x / 16.0 - 8 * 13) * SIZE_MULTIPLIER;
+							x_after  = (frame_after.x / 16.0 - 8 * 13) * SIZE_MULTIPLIER;
+							y_before = level_subworld_image[data_id]->height()
+									   - (frame.y / 16.0 - 16 * 6) * SIZE_MULTIPLIER
+									   + level_overworld_image[data_id]->height() + 360 * SIZE_MULTIPLIER;
+							y_after = level_subworld_image[data_id]->height()
+									  - (frame_after.y / 16.0 - 16 * 6) * SIZE_MULTIPLIER
+									  + level_overworld_image[data_id]->height() + 360 * SIZE_MULTIPLIER;
 						} else {
-							x_before = frame.x / 16 - 8 * 13;
-							x_after  = frame_after.x / 16 - 8 * 13;
-							y_before = level_overworld_image[data_id]->height() - (frame.y / 16 - 16 * 6) + 120;
-							y_after  = level_overworld_image[data_id]->height() - (frame_after.y / 16 - 16 * 6) + 120;
+							x_before = (frame.x / 16.0 - 8 * 13) * SIZE_MULTIPLIER;
+							x_after  = (frame_after.x / 16.0 - 8 * 13) * SIZE_MULTIPLIER;
+							y_before = level_overworld_image[data_id]->height()
+									   - (frame.y / 16.0 - 16 * 6) * SIZE_MULTIPLIER + 120 * SIZE_MULTIPLIER;
+							y_after = level_overworld_image[data_id]->height()
+									  - (frame_after.y / 16.0 - 16 * 6) * SIZE_MULTIPLIER + 120 * SIZE_MULTIPLIER;
 						}
 
-						float lerp = player_update_subframe / 4.0;
+						float lerp = player_update_subframe / (double)NUM_SUBFRAMES;
 						int x      = x_before + lerp * (x_after - x_before);
 						int y      = y_before + lerp * (y_after - y_before);
 
-						canvas->drawLine(
-							SkPoint::Make(x_before + 8, y_before - 8), SkPoint::Make(x + 8, y - 8), linePaint);
+						canvas->drawLine(SkPoint::Make(x_before + 8 * SIZE_MULTIPLIER, y_before - 8 * SIZE_MULTIPLIER),
+							SkPoint::Make(x + 8 * SIZE_MULTIPLIER, y - 8 * SIZE_MULTIPLIER), linePaint);
 					}
 				}
 
@@ -1857,7 +1926,7 @@ int main(int argc, char* argv[]) {
 			}
 #endif
 
-			if(player_update_subframe == 3) {
+			if(player_update_subframe == (NUM_SUBFRAMES - 1)) {
 				player_update_subframe = 0;
 				player_update++;
 			} else {
@@ -1871,7 +1940,7 @@ int main(int argc, char* argv[]) {
 			}
 
 #ifdef STOP_EARLY
-			if(frame == 2000) {
+			if(frame == 8000) {
 				stop = true;
 			}
 #endif
