@@ -70,7 +70,7 @@ extern "C" {
 //#define ONLY_FASTEST 1
 
 // Looks better in slowmo
-#define NUM_SUBFRAMES 30
+#define NUM_SUBFRAMES 40
 #define SIZE_MULTIPLIER 2
 
 bool gzip_decompress(uint8_t* input, int input_size, std::vector<uint8_t>& output) {
@@ -1678,7 +1678,7 @@ int main(int argc, char* argv[]) {
 				auto player_num = ninji_paths_sorted[data_id][rank];
 				auto& frames    = ninji_paths[data_id][player_num];
 #ifdef RENDER_PLAYER
-				if(player_update < frames.size()) {
+				if(player_update < frames.size() - 1) {
 					auto& player                  = player_info[player_num];
 					auto& player_local            = player_local_info[data_id][player_num];
 					auto& player_sprites          = player_image[data_id][player_local.charactor];
