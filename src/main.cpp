@@ -57,6 +57,10 @@ extern "C" {
 #include <OpenGLES/ES2/gl.h>
 #endif
 
+#undef min
+#undef max
+#include "spline.h"
+
 #define RENDER_VIDEO 1
 //#define RENDER_SCREEN 1
 
@@ -70,7 +74,7 @@ extern "C" {
 //#define ONLY_FASTEST 1
 
 // Looks better in slowmo
-#define NUM_SUBFRAMES 40
+#define NUM_SUBFRAMES 8
 #define SIZE_MULTIPLIER 2
 
 bool gzip_decompress(uint8_t* input, int input_size, std::vector<uint8_t>& output) {
@@ -276,6 +280,76 @@ void encode_frame(AVFormatContext* fmt_ctx, AVCodecContext* enc_ctx, AVFrame* fr
 	}
 }
 
+/*
+void draw_rotated_image(SkCanvas* canvas, const sk_sp<SkImage>& image, float angleRadians, SkPoint center) {
+	SkPaint paint;
+	paint.setAntiAlias(false); // Disable anti-aliasing
+
+	// Save the current canvas state
+	canvas->save();
+
+	// Calculate the center of the image
+	SkScalar imgCenterX = (SkScalar)image->width() / 2;
+	SkScalar imgCenterY = (SkScalar)image->height() / 2;
+
+	// Convert radians to degrees
+	float angleDegrees = SkRadiansToDegrees(angleRadians);
+
+	// Set up the translation to position the image's center at the specified center point
+	SkScalar translateX = center.x() - imgCenterX;
+	SkScalar translateY = center.y() - imgCenterY;
+
+	// Create and apply a rotation matrix around the image center
+	SkMatrix matrix;
+	matrix.setTranslate(-imgCenterX, -imgCenterY); // Move pivot to origin
+	matrix.postRotate(angleDegrees);               // Rotate around pivot
+	matrix.postTranslate(center.x(), center.y());  // Move pivot to desired position
+
+	// Apply the matrix to the canvas
+	canvas->concat(matrix);
+
+	// Draw the image at the transformed location
+	canvas->drawImage(image, 0, 0, SkSamplingOptions(), &paint);
+
+	// Restore the original canvas state
+	canvas->restore();
+}
+*/
+void draw_rotated_image(SkCanvas* canvas, const sk_sp<SkImage>& image, float angleRadians, SkPoint center) {
+    SkPaint paint;
+    paint.setAntiAlias(false); // Disable anti-aliasing
+
+    // Save the current canvas state to restore later
+    canvas->save();
+
+    // Calculate the center of the image
+    SkScalar imgCenterX = (SkScalar)image->width() / 2;
+    SkScalar imgCenterY = (SkScalar)image->height() / 2;
+
+    // Convert radians to degrees
+    float angleDegrees = SkRadiansToDegrees(angleRadians);
+
+    // Set up the translation to position the image's center at the specified center point
+    SkScalar translateX = center.x() - imgCenterX;
+    SkScalar translateY = center.y() - imgCenterY;
+
+    // Create a single matrix operation to combine rotation and translation
+    SkMatrix matrix;
+    matrix.setRotate(angleDegrees, imgCenterX, imgCenterY); // Rotate around the image center
+    matrix.postTranslate(translateX, translateY);           // Move to the desired position
+
+    // Apply the matrix to the canvas
+    canvas->concat(matrix);
+
+    // Draw the image at the transformed location
+    canvas->drawImage(image, 0, 0, SkSamplingOptions(), &paint);
+
+    // Restore the canvas state to what it was before
+    canvas->restore();
+}
+
+
+
 int main(int argc, char* argv[]) {
 #ifdef WIN32
 	SetConsoleOutputCP(CP_UTF8);
@@ -294,25 +368,66 @@ int main(int argc, char* argv[]) {
 		std::cout << "Rendering " << id << std::endl;
 	}
 
+	sqlite3* file_db;
 	sqlite3* db;
 	char* err_msg = 0;
 	sqlite3_stmt* res;
 
+	// Open file db
 	int rc = sqlite3_open("../ninji_replay.db", &db);
 
 	if(rc != SQLITE_OK) {
-		fprintf(stderr, "Cannot open database: %s\n", sqlite3_errmsg(db));
-		sqlite3_close(db);
+		fprintf(stderr, "Cannot open file database: %s\n", sqlite3_errmsg(file_db));
+		sqlite3_close(file_db);
 		return 1;
 	}
 
-	// Increase cache size for performance
-	sqlite3_exec(db, "PRAGMA cache_size=-20000", 0, 0, 0);
+	/*
+		// Open memory db
+		rc = sqlite3_open(":memory:", &db);
 
-	char* replay_query = "SELECT data_id,pid,time,replay FROM ninji";
+		if(rc != SQLITE_OK) {
+			fprintf(stderr, "Cannot open memory database: %s\n", sqlite3_errmsg(db));
+			sqlite3_close(db);
+			return 1;
+		}
+
+		// Copy into memory db
+		sqlite3_backup* backup = sqlite3_backup_init(db, "main", file_db, "main");
+
+		if(!backup) {
+			fprintf(stderr, "Cannot backup to memory: %s\n", sqlite3_errmsg(db));
+			return 1;
+		}
+
+		rc = sqlite3_backup_step(backup, -1);
+
+		if(rc != SQLITE_DONE) {
+			fprintf(stderr, "Cannot step backup: %d\n", rc);
+			return 1;
+		}
+
+		rc = sqlite3_backup_finish(backup);
+
+		if(rc != SQLITE_OK) {
+			fprintf(stderr, "Cannot finish backup\n");
+			return 1;
+		}
+
+		rc = sqlite3_close(file_db);
+
+		if(rc != SQLITE_OK) {
+			fprintf(stderr, "Cannot close file database: %s\n", sqlite3_errmsg(file_db));
+			sqlite3_close(file_db);
+			return 1;
+		}
+		*/
+
+	char* replay_query = "SELECT data_id,pid,time,replay FROM ninji LIMIT -1 OFFSET 1000000";
 	rc                 = sqlite3_prepare_v2(db, replay_query, -1, &res, 0);
 	if(rc != SQLITE_OK) {
 		std::cout << "Sqlite could not prepare query" << std::endl;
+		printf("%s: %s\n", sqlite3_errstr(sqlite3_extended_errcode(db)), sqlite3_errmsg(db));
 		return -1;
 	}
 
@@ -382,27 +497,27 @@ int main(int argc, char* argv[]) {
 
 	// Used to determine the threshold of a green path, or a good run
 	static std::unordered_map<int, double> lines_exponential_constant = {
-		{ 33883306, 0.09 },
-		{ 29234075, 0.04 },
-		{ 28460377, 0.03 },
-		{ 27439231, 0.03 },
-		{ 26746705, 0.04 },
-		{ 25984384, 0.05 },
-		{ 25459053, 0.07 },
-		{ 25045367, 0.03 },
-		{ 24477739, 0.05 },
-		{ 23738173, 0.02 },
-		{ 23303835, 0.05 },
-		{ 22587491, 0.04 },
-		{ 21858065, 0.01 },
-		{ 20182790, 0.02 },
-		{ 17110274, 0.03 },
-		{ 15675466, 0.01 },
-		{ 14827235, 0.03 },
-		{ 14328331, 0.04 },
-		{ 13428950, 0.03 },
-		{ 12619193, 0.03 },
-		{ 12171034, 0.001 },
+		{ 33883306, 0.055 },  //
+		{ 29234075, 0.03 },   //
+		{ 28460377, 0.025 },  //
+		{ 27439231, 0.025 },  //
+		{ 26746705, 0.03 },   //
+		{ 25984384, 0.035 },  //
+		{ 25459053, 0.055 },  //
+		{ 25045367, 0.025 },  //
+		{ 24477739, 0.035 },  //
+		{ 23738173, 0.017 },  //
+		{ 23303835, 0.035 },  //
+		{ 22587491, 0.03 },   //
+		{ 21858065, 0.007 },  //
+		{ 20182790, 0.017 },  // NO
+		{ 17110274, 0.025 },  // NO
+		{ 15675466, 0.007 },  //
+		{ 14827235, 0.025 },  //
+		{ 14328331, 0.03 },   //
+		{ 13428950, 0.025 },  //
+		{ 12619193, 0.025 },  //
+		{ 12171034, 0.0007 }, //
 	};
 
 	// 23738173 26746705 27439231 29234075 12171034 12619193 13428950 14328331
@@ -708,6 +823,35 @@ int main(int argc, char* argv[]) {
 				std::vector<uint8_t> decompressed_replay(replay_size);
 				gzip_decompress(replay_data, replay_size, decompressed_replay);
 
+				std::ofstream outfile("example.bin", std::ios::out | std::ios::binary);
+				outfile.write((const char*)&decompressed_replay[0], decompressed_replay.size());
+				outfile.close();
+
+				uint32_t frames = *(uint32_t*)&decompressed_replay[0x10];
+				toLittleEndian(frames);
+
+				/*
+				uint32_t unk11 = *(uint32_t*)&decompressed_replay[0x18];
+				toLittleEndian(unk11);
+				uint32_t unk12 = *(uint32_t*)&decompressed_replay[0x1A];
+				toLittleEndian(unk12);
+				uint32_t unk13 = *(uint32_t*)&decompressed_replay[0x1C];
+				toLittleEndian(unk13);
+				uint32_t unk14 = *(uint32_t*)&decompressed_replay[0x04];
+				toLittleEndian(unk14);
+				uint32_t unk15 = *(uint32_t*)&decompressed_replay[0x08];
+				toLittleEndian(unk15);
+				uint16_t unk16 = *(uint16_t*)&decompressed_replay[0x16];
+				toLittleEndianShort(unk16);
+				uint8_t unk17   = *(uint8_t*)&decompressed_replay[0x15];
+
+				std::cout << pid << "," << unk11 << "," << unk12 << "," << unk13 << "," << unk14 << "," << unk15 << ","
+						  << unk16 << "," << (int)unk17 << "," << frames << "," << (unk11 - frames) << ","
+						  << (unk12 - frames) << "," << (unk13 - frames) << std::endl;
+
+				continue;
+				*/
+
 				/*
 				// Mario, Mario, Luigi, Luigi, Toad
 				if(std::unordered_set({ 42177, 42513, 43352, 43581, 43588 }).contains(time)) {
@@ -826,8 +970,7 @@ int main(int argc, char* argv[]) {
 
 				uint8_t charactor                  = decompressed_replay[0x14];
 				player_local_info[data_id][player] = NinjiGlobalInfo { charactor };
-				uint32_t frames                    = *(uint32_t*)&decompressed_replay[0x10];
-				toLittleEndian(frames);
+
 				// Ninji's are rendered every 4 frames, 2 is because the frames is always two less than it should be
 				int frames_size = (frames + 2) / 4;
 
@@ -851,6 +994,10 @@ int main(int argc, char* argv[]) {
 						uint8_t unk1 = decompressed_replay[current_offset];
 						current_offset++;
 
+						//std::cout << "This frame flags: " << std::bitset<8>(flags)
+						//		  << " player state: " << (int)player_state << " x: " << x << " y: " << y
+						//		  << " unk1: " << std::bitset<8>(unk1) << std::endl;
+
 						// if(first) {
 						//	std::cout << "Unk1 " << std::bitset<8>(unk1) << std::endl;
 						// }
@@ -860,24 +1007,30 @@ int main(int argc, char* argv[]) {
 						} else if(unk1 & 0b00011000) {
 							current_offset += 2;
 						}
+
+						// MISSING LOGIC
+
 						// ninji_paths[data_id][player].push_back(
 						//	NinjiFrame { player_state, x, y, (NinjiFrameInfo)unk1, flags });
-						//  if(!unique_states.contains(unk1)) {
-						//	std::cout << "NEW " << (int)unk1 << std::endl;
-						//	unique_states.emplace(unk1);
-						//  }
 						//  if(x & 7 != 1) {
 						//	uint16_t unk2 = *(uint16_t*)&decompressed_replay[current_offset];
 						//	current_offset += 2;
 						//	toLittleEndianShort(unk2);
 						// }
+					} else {
+						//std::cout << "This frame flags: " << std::bitset<8>(flags)
+						//		  << " player state: " << (int)player_state << " x: " << x << " y: " << y << std::endl;
 					}
 
 					ninji_paths[data_id][player].push_back(NinjiFrame { player_state, x, y, flags });
+
+					// std::cout << std::bitset<8>(flags) << std::endl;
 				}
 
 				level_times[data_id].push_back(NinjiTime { player, time });
 				ninji_times[data_id][player] = time;
+
+				// exit(0);
 
 #ifdef STOP_EARLY
 				if(ninji_paths[data_id].size() == 300) {
@@ -888,11 +1041,11 @@ int main(int argc, char* argv[]) {
 #endif
 			}
 
-			row++;
-
 			if(row % 1000 == 0) {
 				std::cout << "Handled ninji row " << row << std::endl;
 			}
+
+			row++;
 		} else if(step == SQLITE_DONE) {
 			break;
 		} else if(step == SQLITE_BUSY) {
@@ -1163,10 +1316,9 @@ int main(int argc, char* argv[]) {
 
 	int leaderboard_x_offset   = 3840 * SIZE_MULTIPLIER;
 	int leaderboard_width      = 352 * SIZE_MULTIPLIER;
-	int leaderboard_height     = 1080 * SIZE_MULTIPLIER;
+	int leaderboard_height     = 1500 * SIZE_MULTIPLIER;
 	int countries_graph_height = 500 * SIZE_MULTIPLIER;
-	int timer_x                = 1000 * SIZE_MULTIPLIER;
-	int timer_y                = (432 + 2688 + 20) * SIZE_MULTIPLIER;
+	int timer_x                = leaderboard_x_offset - leaderboard_width - 500;
 
 #ifdef RENDER_SCREEN
 	// Start rendering to screen
@@ -1342,14 +1494,14 @@ int main(int argc, char* argv[]) {
 	rankFont.setSize(10 * SIZE_MULTIPLIER);
 	SkFont hoverNameFont(SkTypeface::MakeFromFile("../assets/fonts/NotoSansJP-Regular.otf"));
 	hoverNameFont.setSize(10 * SIZE_MULTIPLIER);
-	SkFont timerFont(SkTypeface::MakeFromFile("../assets/fonts/NotoSansJP-Regular.otf"));
+	SkFont timerFont(SkTypeface::MakeFromFile("../assets/fonts/NotoSansJP-Bold.otf"));
 	timerFont.setSize(90 * SIZE_MULTIPLIER);
 
 	SkPaint hoverNamePaint;
 	hoverNamePaint.setColor(SK_ColorWHITE);
 	hoverNamePaint.setAlpha(150);
 	SkPaint timerPaint;
-	timerPaint.setColor(SK_ColorWHITE);
+	timerPaint.setColor(SK_ColorBLACK);
 
 	std::cout << "Prepare to render" << std::endl;
 
@@ -1409,6 +1561,7 @@ int main(int argc, char* argv[]) {
 		codec_context->max_b_frames = 1;
 		codec_context->pix_fmt      = AV_PIX_FMT_RGB24;
 		codec_context->bit_rate     = 8e+7;
+		codec_context->colorspace   = AVCOL_SPC_RGB;
 		av_opt_set(codec_context->priv_data, "crf", "17", 0);
 		av_opt_set(codec_context->priv_data, "preset", "veryslow", 0);
 
@@ -1440,11 +1593,11 @@ int main(int argc, char* argv[]) {
 		std::cout << "Created packet for " << data_id << std::endl;
 
 #ifdef DRAW_NAMES
-		std::string filename = std::to_string(data_id) + "_names.mp4";
+		std::string filename = std::to_string(data_id) + "_names.mov";
 #elif defined(RENDER_LINES)
-		std::string filename = std::to_string(data_id) + "_lines.mp4";
+		std::string filename = std::to_string(data_id) + "_lines.mov";
 #else
-		std::string filename = std::to_string(data_id) + ".mp4";
+		std::string filename = std::to_string(data_id) + ".mov";
 #endif
 
 		AVFormatContext* oc;
@@ -1552,7 +1705,7 @@ int main(int argc, char* argv[]) {
 			int milliseconds = time % 1000;
 			auto time_string = fmt::format("{:0>2}:{:0>2}.{:0>3}", minutes, seconds, milliseconds);
 			canvas->drawSimpleText(time_string.c_str(), strlen(time_string.c_str()), SkTextEncoding::kUTF8, timer_x,
-				timer_y, timerFont, timerPaint);
+				levels_height + 300, timerFont, timerPaint);
 
 			// Draw countries graph
 			std::vector<std::pair<std::string, int>> sorted_country_counts;
@@ -1678,6 +1831,18 @@ int main(int argc, char* argv[]) {
 				auto player_num = ninji_paths_sorted[data_id][rank];
 				auto& frames    = ninji_paths[data_id][player_num];
 #ifdef RENDER_PLAYER
+				// Generate P balloon splines, just in case they're used
+				std::vector<double> direction_facing_x;
+				std::vector<double> direction_facing_y_xdelta;
+				std::vector<double> direction_facing_y_ydelta;
+				for(int frame = 1; frame < frames.size(); frame++) {
+					direction_facing_x.push_back((double)((frame - 1) * NUM_SUBFRAMES));
+					direction_facing_y_xdelta.push_back((double)(frames[frame].x - frames[frame - 1].x));
+					direction_facing_y_ydelta.push_back((double)(frames[frame].y - frames[frame - 1].y));
+				}
+				tk::spline direction_facing_spline_x(direction_facing_x, direction_facing_y_xdelta);
+				tk::spline direction_facing_spline_y(direction_facing_x, direction_facing_y_ydelta);
+
 				if(player_update < frames.size() - 1) {
 					auto& player                  = player_info[player_num];
 					auto& player_local            = player_local_info[data_id][player_num];
@@ -1685,8 +1850,9 @@ int main(int argc, char* argv[]) {
 					auto& player_mirrored_sprites = player_mirrored_image[data_id][player_local.charactor];
 
 					auto& frame = frames[player_update];
-					// Check that not in pipe transition, very glitchy
-					if(!(frame.flags & 0b00000100)) {
+					// Check that current frame nor next frame are in pipe transition, very glitchy
+					if(!(frame.flags & 0b00000100)
+						&& !((player_update + 1) < frames.size() && frames[player_update + 1].flags & 0b00000100)) {
 						ninji_is_subworld[data_id][player_num] = frame.flags & 0b00001000;
 
 						int x;
@@ -1732,16 +1898,28 @@ int main(int argc, char* argv[]) {
 							}
 						}
 
-						if(player_update != 0 && frames[player_update - 1].x != frames[player_update].x) {
-							player_facing[data_id][player_num] = frames[player_update].x < frames[player_update - 1].x;
-						}
-
-						if(player_facing[data_id][player_num]) {
-							auto sprite = player_mirrored_sprites[frame.state];
-							canvas->drawImage(sprite, x, y - sprite->height());
+						if(frame.state == 13 || frame.state == 14) {
+							// P balloon, specific rotation code using splines
+							auto sprite    = player_sprites[frame.state];
+							double delta_x = direction_facing_spline_x(
+								(double)(player_update * NUM_SUBFRAMES + player_update_subframe));
+							double delta_y = direction_facing_spline_y(
+								(double)(player_update * NUM_SUBFRAMES + player_update_subframe));
+							draw_rotated_image(
+								canvas, sprite, atan2(delta_y, -delta_x), SkPoint::Make(x + 8, y + 8 - sprite->height() / 2));
 						} else {
-							auto sprite = player_sprites[frame.state];
-							canvas->drawImage(sprite, x, y - sprite->height());
+							if(player_update != 0 && frames[player_update - 1].x != frames[player_update].x) {
+								player_facing[data_id][player_num]
+									= frames[player_update].x < frames[player_update - 1].x;
+							}
+
+							if(player_facing[data_id][player_num]) {
+								auto sprite = player_mirrored_sprites[frame.state];
+								canvas->drawImage(sprite, x + 8 - sprite->width() / 2, y + 8 - sprite->height() / 2 - sprite->height());
+							} else {
+								auto sprite = player_sprites[frame.state];
+								canvas->drawImage(sprite, x + 8 - sprite->width() / 2, y + 8 - sprite->height() / 2 - sprite->height());
+							}
 						}
 
 #ifdef DRAW_NAMES
@@ -1940,7 +2118,7 @@ int main(int argc, char* argv[]) {
 			}
 
 #ifdef STOP_EARLY
-			if(frame == 8000) {
+			if(frame == 4000) {
 				stop = true;
 			}
 #endif
