@@ -1,6 +1,8 @@
 #define SK_GL
 #include "glad/glad.h"
 
+#define MAX_PATH 260
+
 #define SK_RELEASE
 #include <CLI/App.hpp>
 #include <CLI/Config.hpp>
