@@ -1621,6 +1621,8 @@ int main(int argc, char* argv[]) {
 #endif
 
 		std::unordered_set<int> seen_states;
+		std::unordered_map<int, tk::spline> direction_facing_spline_x_player;
+		std::unordered_map<int, tk::spline> direction_facing_spline_y_player;
 		while(!stop) {
 			canvas->clear(SK_ColorBLACK);
 
@@ -1834,16 +1836,20 @@ int main(int argc, char* argv[]) {
 				auto& frames    = ninji_paths[data_id][player_num];
 #ifdef RENDER_PLAYER
 				// Generate P balloon splines, just in case they're used
-				std::vector<double> direction_facing_x;
-				std::vector<double> direction_facing_y_xdelta;
-				std::vector<double> direction_facing_y_ydelta;
-				for(int frame = 1; frame < frames.size(); frame++) {
-					direction_facing_x.push_back((double)((frame - 1) * NUM_SUBFRAMES));
-					direction_facing_y_xdelta.push_back((double)(frames[frame].x - frames[frame - 1].x));
-					direction_facing_y_ydelta.push_back((double)(frames[frame].y - frames[frame - 1].y));
+				if (direction_facing_spline_x_player.find(player_num) == direction_facing_spline_x_player.end()) {
+					std::vector<double> direction_facing_x;
+					std::vector<double> direction_facing_y_xdelta;
+					std::vector<double> direction_facing_y_ydelta;
+					for(int frame = 1; frame < frames.size(); frame++) {
+						direction_facing_x.push_back((double)((frame - 1) * NUM_SUBFRAMES));
+						direction_facing_y_xdelta.push_back((double)(frames[frame].x - frames[frame - 1].x));
+						direction_facing_y_ydelta.push_back((double)(frames[frame].y - frames[frame - 1].y));
+					}
+					tk::spline direction_facing_spline_x(direction_facing_x, direction_facing_y_xdelta);
+					tk::spline direction_facing_spline_y(direction_facing_x, direction_facing_y_ydelta);
+					direction_facing_spline_x_player[player_num] = direction_facing_spline_x;
+					direction_facing_spline_y_player[player_num] = direction_facing_spline_y;
 				}
-				tk::spline direction_facing_spline_x(direction_facing_x, direction_facing_y_xdelta);
-				tk::spline direction_facing_spline_y(direction_facing_x, direction_facing_y_ydelta);
 
 				if(player_update < frames.size() - 1) {
 					auto& player                  = player_info[player_num];
@@ -1903,9 +1909,9 @@ int main(int argc, char* argv[]) {
 						if(frame.state == 13 || frame.state == 14) {
 							// P balloon, specific rotation code using splines
 							auto sprite    = player_sprites[frame.state];
-							double delta_x = direction_facing_spline_x(
+							double delta_x = direction_facing_spline_x_player[player_num](
 								(double)(player_update * NUM_SUBFRAMES + player_update_subframe));
-							double delta_y = direction_facing_spline_y(
+							double delta_y = direction_facing_spline_y_player[player_num](
 								(double)(player_update * NUM_SUBFRAMES + player_update_subframe));
 							draw_rotated_image(
 								canvas, sprite, atan2(delta_y, -delta_x), SkPoint::Make(x + 8, y + 8 - sprite->height() / 2));
