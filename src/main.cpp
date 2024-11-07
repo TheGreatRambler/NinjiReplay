@@ -1145,9 +1145,9 @@ int main(int argc, char* argv[]) {
 		jpeg->getPixels(info, bitmap.getPixels(), bitmap.rowBytes());
 		bitmap.setImmutable();
 
-		sk_sp<SkSurface> rasterSurface = SkSurface::MakeRasterN32Premul(24 * SIZE_MULTIPLIER, 24 * SIZE_MULTIPLIER);
+		sk_sp<SkSurface> rasterSurface = SkSurface::MakeRasterN32Premul(24 * 2 * SIZE_MULTIPLIER, 24 * 2 * SIZE_MULTIPLIER);
 		rasterSurface->getCanvas()->drawImageRect(bitmap.asImage(), SkRect::MakeLTRB(75, 75, 512 - 75, 512 - 75),
-			SkRect::MakeWH(24 * SIZE_MULTIPLIER, 24 * SIZE_MULTIPLIER), SkSamplingOptions(SkFilterMode::kNearest),
+			SkRect::MakeWH(24 * 2 * SIZE_MULTIPLIER, 24 * 2 * SIZE_MULTIPLIER), SkSamplingOptions(SkFilterMode::kNearest),
 			nullptr, SkCanvas::kStrict_SrcRectConstraint);
 
 		player_info[image.first].mii_image = rasterSurface->makeImageSnapshot();
@@ -1258,9 +1258,9 @@ int main(int argc, char* argv[]) {
 		flag_codec->getPixels(info, bitmap->getPixels(), bitmap->rowBytes());
 		bitmap->setImmutable();
 
-		sk_sp<SkSurface> rasterSurface = SkSurface::MakeRasterN32Premul(36 * SIZE_MULTIPLIER, 24 * SIZE_MULTIPLIER);
+		sk_sp<SkSurface> rasterSurface = SkSurface::MakeRasterN32Premul(36 * 2 * SIZE_MULTIPLIER, 24 * 2 * SIZE_MULTIPLIER);
 		rasterSurface->getCanvas()->drawImageRect(bitmap->asImage(), SkRect::MakeWH(180, 120),
-			SkRect::MakeWH(36 * SIZE_MULTIPLIER, 24 * SIZE_MULTIPLIER), SkSamplingOptions(SkFilterMode::kNearest),
+			SkRect::MakeWH(36 * 2 * SIZE_MULTIPLIER, 24 * 2 * SIZE_MULTIPLIER), SkSamplingOptions(SkFilterMode::kNearest),
 			nullptr, SkCanvas::kStrict_SrcRectConstraint);
 
 		flag_image[flag] = rasterSurface->makeImageSnapshot();
@@ -1311,14 +1311,9 @@ int main(int argc, char* argv[]) {
 
 	std::cout << "Created level images" << std::endl;
 
-	// Paint for rendering, preserves pixel art
-	SkPaint paint;
-	paint.setAntiAlias(false);
-	paint.setColor(SK_ColorWHITE);
-
 	int leaderboard_x_offset   = 3840 * SIZE_MULTIPLIER;
-	int leaderboard_width      = 352 * SIZE_MULTIPLIER;
-	int leaderboard_height     = 1500 * SIZE_MULTIPLIER;
+	int leaderboard_width      = 800 * SIZE_MULTIPLIER;
+	int leaderboard_height     = 3000 * SIZE_MULTIPLIER;
 	int countries_graph_height = 500 * SIZE_MULTIPLIER;
 	int timer_x                = leaderboard_x_offset - leaderboard_width - 500;
 
@@ -1489,21 +1484,33 @@ int main(int argc, char* argv[]) {
 #endif
 
 	SkFont nameFont(SkTypeface::MakeFromFile("../assets/fonts/NotoSansJP-Regular.otf"));
-	nameFont.setSize(15 * SIZE_MULTIPLIER);
+	nameFont.setSize(30 * SIZE_MULTIPLIER);
+	nameFont.setEdging(SkFont::Edging::kAlias);
 	SkFont rankFont(SkTypeface::MakeFromFile("../assets/fonts/NotoSansJP-Regular.otf"));
-	rankFont.setSize(20 * SIZE_MULTIPLIER);
+	rankFont.setSize(40 * SIZE_MULTIPLIER);
+	rankFont.setEdging(SkFont::Edging::kAlias);
 	SkFont countryCountFont(SkTypeface::MakeFromFile("../assets/fonts/NotoSansJP-Regular.otf"));
-	rankFont.setSize(10 * SIZE_MULTIPLIER);
+	countryCountFont.setSize(20 * SIZE_MULTIPLIER);
+	countryCountFont.setEdging(SkFont::Edging::kAlias);
 	SkFont hoverNameFont(SkTypeface::MakeFromFile("../assets/fonts/NotoSansJP-Regular.otf"));
 	hoverNameFont.setSize(10 * SIZE_MULTIPLIER);
+	hoverNameFont.setEdging(SkFont::Edging::kAlias);
 	SkFont timerFont(SkTypeface::MakeFromFile("../assets/fonts/NotoSansJP-Bold.otf"));
-	timerFont.setSize(90 * SIZE_MULTIPLIER);
+	timerFont.setSize(180 * SIZE_MULTIPLIER);
+	timerFont.setEdging(SkFont::Edging::kAlias);
 
 	SkPaint hoverNamePaint;
+	hoverNamePaint.setAntiAlias(false);
 	hoverNamePaint.setColor(SK_ColorWHITE);
 	hoverNamePaint.setAlpha(150);
+
 	SkPaint timerPaint;
-	timerPaint.setColor(SK_ColorBLACK);
+	timerPaint.setAntiAlias(false);
+	timerPaint.setColor(SK_ColorWHITE);
+
+	SkPaint leaderboardFontPaint;
+	leaderboardFontPaint.setAntiAlias(false);
+	leaderboardFontPaint.setColor(SK_ColorWHITE);
 
 	std::cout << "Prepare to render" << std::endl;
 
@@ -1562,7 +1569,7 @@ int main(int argc, char* argv[]) {
 		codec_context->gop_size     = 10;
 		codec_context->max_b_frames = 1;
 		codec_context->pix_fmt      = AV_PIX_FMT_RGB24;
-		codec_context->bit_rate     = 8e+7;
+		codec_context->bit_rate     = 1e+8;
 		codec_context->colorspace   = AVCOL_SPC_RGB;
 		av_opt_set(codec_context->priv_data, "crf", "17", 0);
 		av_opt_set(codec_context->priv_data, "preset", "veryslow", 0);
@@ -1672,7 +1679,7 @@ int main(int argc, char* argv[]) {
 
 			// Draw both "greenscreens" for chromakey
 			SkPaint greenscreenPaint;
-			greenscreenPaint.setColor(SkColorSetARGB(255, 190, 3, 253));
+			greenscreenPaint.setColor(SkColorSetARGB(255, 190, 0, 255));
 			canvas->drawRect(
 				SkRect::MakeXYWH(leaderboard_x_offset, 0, leaderboard_width, leaderboard_height), greenscreenPaint);
 			canvas->drawRect(
@@ -1688,18 +1695,18 @@ int main(int argc, char* argv[]) {
 				auto& time   = level_times[data_id][index];
 				auto& player = player_info[time.player];
 
-				int y                  = (rank + 1) * 36 * SIZE_MULTIPLIER;
+				int y                  = (rank + 1) * 36 * 2 * SIZE_MULTIPLIER;
 				std::string rankString = std::to_string(level_times_size[data_id] - index);
 				canvas->drawSimpleText(rankString.c_str(), rankString.size(), SkTextEncoding::kUTF8,
-					leaderboard_x_offset, y, rankFont, paint);
+					leaderboard_x_offset + 8 * SIZE_MULTIPLIER, y, rankFont, leaderboardFontPaint);
 				if(player.mii_image) {
 					canvas->drawImage(
-						player.mii_image, leaderboard_x_offset + 46 * SIZE_MULTIPLIER, y - 20 * SIZE_MULTIPLIER);
+						player.mii_image, leaderboard_x_offset + 176 * SIZE_MULTIPLIER, y - 20 * 2 * SIZE_MULTIPLIER);
 				}
 				canvas->drawImage(
-					flag_image[player.country], leaderboard_x_offset + 76 * SIZE_MULTIPLIER, y - 20 * SIZE_MULTIPLIER);
+					flag_image[player.country], leaderboard_x_offset + 236 * SIZE_MULTIPLIER, y - 20 * 2 * SIZE_MULTIPLIER);
 				canvas->drawSimpleText(player.name.c_str(), player.name.size(), SkTextEncoding::kUTF8,
-					leaderboard_x_offset + 116 * SIZE_MULTIPLIER, y, nameFont, paint);
+					leaderboard_x_offset + 316 * SIZE_MULTIPLIER, y, nameFont, leaderboardFontPaint);
 			}
 
 			// Draw timer
@@ -1709,7 +1716,7 @@ int main(int argc, char* argv[]) {
 			int milliseconds = time % 1000;
 			auto time_string = fmt::format("{:0>2}:{:0>2}.{:0>3}", minutes, seconds, milliseconds);
 			canvas->drawSimpleText(time_string.c_str(), strlen(time_string.c_str()), SkTextEncoding::kUTF8, timer_x,
-				levels_height + 300, timerFont, timerPaint);
+				levels_height + 800, timerFont, timerPaint);
 
 			// Draw countries graph
 			std::vector<std::pair<std::string, int>> sorted_country_counts;
@@ -1734,7 +1741,7 @@ int main(int argc, char* argv[]) {
 				std::string numString = std::to_string(entry.second);
 				canvas->drawSimpleText(numString.c_str(), numString.size(), SkTextEncoding::kUTF8,
 					start_x + 7 * SIZE_MULTIPLIER, levels_height + countries_graph_height - 30 * SIZE_MULTIPLIER,
-					countryCountFont, paint);
+					countryCountFont, leaderboardFontPaint);
 
 				// Draw graph bar
 				int bar_height = total_height * ((float)entry.second / biggest_size);
@@ -1906,7 +1913,7 @@ int main(int argc, char* argv[]) {
 							}
 						}
 
-						if(frame.state == 13 || frame.state == 14) {
+						if((frame.state == 13 || frame.state == 14) && gamestyle[data_id] == "smw") {
 							// P balloon, specific rotation code using splines
 							auto sprite    = player_sprites[frame.state];
 							double delta_x = direction_facing_spline_x_player[player_num](
@@ -1914,7 +1921,7 @@ int main(int argc, char* argv[]) {
 							double delta_y = direction_facing_spline_y_player[player_num](
 								(double)(player_update * NUM_SUBFRAMES + player_update_subframe));
 							draw_rotated_image(
-								canvas, sprite, atan2(delta_y, -delta_x), SkPoint::Make(x + 8, y + 8 - sprite->height() / 2));
+								canvas, sprite, atan2(delta_y, -delta_x), SkPoint::Make(x + 16, y + 16 - sprite->height() / 2));
 						} else {
 							if(player_update != 0 && frames[player_update - 1].x != frames[player_update].x) {
 								player_facing[data_id][player_num]
@@ -1923,10 +1930,10 @@ int main(int argc, char* argv[]) {
 
 							if(player_facing[data_id][player_num]) {
 								auto sprite = player_mirrored_sprites[frame.state];
-								canvas->drawImage(sprite, x + 8 - sprite->width() / 2, y + 8 - sprite->height() / 2 - sprite->height());
+								canvas->drawImage(sprite, x + 16 - sprite->width() / 2, y + 16 - sprite->height() / 2 - sprite->height());
 							} else {
 								auto sprite = player_sprites[frame.state];
-								canvas->drawImage(sprite, x + 8 - sprite->width() / 2, y + 8 - sprite->height() / 2 - sprite->height());
+								canvas->drawImage(sprite, x + 16 - sprite->width() / 2, y + 16 - sprite->height() / 2 - sprite->height());
 							}
 						}
 
@@ -2126,7 +2133,7 @@ int main(int argc, char* argv[]) {
 			}
 
 #ifdef STOP_EARLY
-			if(frame == 4000) {
+			if(frame == 500) {
 				stop = true;
 			}
 #endif
